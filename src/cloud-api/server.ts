@@ -26,6 +26,7 @@ import geminiTTS from "./gemini/gemini-tts";
 import piperTTS from "./local/piper-tts";
 import piperHttpTTS from "./local/piper-http-tts";
 import LLM8850MeloTTS from "./local/llm8850-melotts";
+import supertonicTTS from "./local/supertonic-tts";
 import {
   RecognizeAudioFunction,
   TTSProcessorFunction,
@@ -117,9 +118,12 @@ switch (ttsServer) {
   case TTSServer.piperhttp:
     ttsProcessor = piperHttpTTS;
     break;
+  case TTSServer.supertonic:
+    ttsProcessor = supertonicTTS;
+    break;
   default:
     console.warn(
-      `unknown tts server: ${ttsServer}, should be volcengine/tencent/openai/gemini/piper/piper-http/llm8850melotts`,
+      `unknown tts server: ${ttsServer}, should be volcengine/tencent/openai/gemini/piper/piper-http/llm8850melotts/supertonic`,
     );
     break;
 }

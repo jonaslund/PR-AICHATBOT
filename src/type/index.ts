@@ -41,6 +41,7 @@ export enum TTSServer {
   piper = "piper",
   piperhttp = "piper-http",
   llm8850melotts = "llm8850melotts",
+  supertonic = "supertonic",
 }
 
 export enum VectorDBServer {
