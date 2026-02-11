@@ -7,8 +7,9 @@ const ollamaEndpoint = process.env.OLLAMA_EMBEDDING_ENDPOINT || process.env.OLLA
 const ollamaEmbeddingModel =
   process.env.OLLAMA_EMBEDDING_MODEL || "nomic-embed-text";
 const embeddingServer = (process.env.EMBEDDING_SERVER || "").toLowerCase().trim();
+const envEnableRAG = (process.env.ENABLE_RAG || "false").toLowerCase() === "true";
 
-if (embeddingServer === "ollama") {
+if (envEnableRAG && embeddingServer === "ollama") {
   // wake request to prevent cold start
   axios.post(`${ollamaEndpoint}/api/embed`, {
     model: ollamaEmbeddingModel,

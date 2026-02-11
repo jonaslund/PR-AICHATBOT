@@ -65,7 +65,7 @@ const keepAliveOllama = () => {
       },
       think: false,
       stream: false,
-      tools: ollamaEnableTools ? llmTools : [],
+      tools: ollamaEnableTools ? llmTools : undefined,
       keep_alive: -1,
     })
     .then((response) => {
@@ -130,7 +130,7 @@ const chatWithLLMStream: ChatWithLLMStreamFunction = async (
           temperature: 0.7,
           num_predict: ollamaPredictNum,
         },
-        tools: ollamaEnableTools ? llmTools : [],
+        tools: ollamaEnableTools ? llmTools : undefined,
         keep_alive: -1,
       },
       {
