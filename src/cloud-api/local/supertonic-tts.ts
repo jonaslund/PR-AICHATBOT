@@ -87,9 +87,18 @@ class SupertonicTTS {
   private style: Style | null = null;
   private sampleRate: number = 24000;
   private initialized: boolean = false;
+  private initializePromise: Promise<void> | null = null;
+  private initializePromiseResolve: () => void = () => {};
 
   async initialize() {
     if (this.initialized) return;
+    if (this.initializePromise) {
+      return this.initializePromise;
+    }
+    this.initializePromiseResolve = () => {};
+    this.initializePromise = new Promise<void>((resolve) => {
+      this.initializePromiseResolve = resolve;
+    });
 
     try {
       console.log("Initializing Supertonic TTS...");
@@ -128,6 +137,9 @@ class SupertonicTTS {
     } catch (error) {
       console.error("Failed to initialize Supertonic TTS:", error);
       throw error;
+    } finally {
+      this.initializePromiseResolve();
+      this.initializePromise = null;
     }
   }
 
@@ -513,6 +525,9 @@ let supertonicInstance: SupertonicTTS | null = null;
 
 if (ttsServer === "supertonic") {
   supertonicInstance = new SupertonicTTS();
+  supertonicInstance.initialize().catch((err) => {
+    console.error("Error initializing Supertonic TTS:", err.message);
+  });
 }
 
 const supertonicTTS = async (text: string): Promise<TTSResult> => {
