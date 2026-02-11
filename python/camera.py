@@ -1,10 +1,15 @@
-from picamera2 import Picamera2
+
 from PIL import Image
 from whisplay import WhisplayBoard
 import sys
 import time
 import threading
 from utils import ImageUtils
+
+try:
+  from picamera2 import Picamera2
+except ImportError:
+  Picamera2 = None
 
 class CameraThread(threading.Thread):
     
