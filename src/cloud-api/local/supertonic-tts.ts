@@ -8,8 +8,11 @@ import * as ort from "onnxruntime-node";
 
 dotenv.config();
 
+function replaceAllString(text: string, search: string, replacement: string) {
+    return text.split(search).join(replacement);
+}
+
 const ttsServer = (process.env.TTS_SERVER || "").toLowerCase();
-// Supertonic configuration from environment variables
 const supertonicAssetsDir =
   process.env.SUPERTONIC_ASSETS_DIR &&
   path.isAbsolute(process.env.SUPERTONIC_ASSETS_DIR)
@@ -19,24 +22,22 @@ const supertonicAssetsDir =
         process.env.SUPERTONIC_ASSETS_DIR || "assets",
       );
 const supertonicOnnxDir = path.join(supertonicAssetsDir, "onnx");
-const supertonicVoiceStyle = process.env.SUPERTONIC_VOICE_STYLE || "M1"; // M1-M5, F1-F5
-const supertonicLanguage = process.env.SUPERTONIC_LANGUAGE || "en"; // en, ko, es, pt, fr
-const supertonicTotalStep = parseInt(process.env.SUPERTONIC_TOTAL_STEP || "5"); // Higher = better quality
-const supertonicSpeed = parseFloat(process.env.SUPERTONIC_SPEED || "1.05"); // Speed multiplier
+const supertonicVoiceStyle = process.env.SUPERTONIC_VOICE_STYLE || "M1";
+const supertonicLanguage = process.env.SUPERTONIC_LANGUAGE || "en";
+const supertonicTotalStep = parseInt(process.env.SUPERTONIC_TOTAL_STEP || "5");
+const supertonicSpeed = parseFloat(process.env.SUPERTONIC_SPEED || "1.05");
 const supertonicSilenceDuration = parseFloat(
   process.env.SUPERTONIC_SILENCE_DURATION || "0.3",
-); // Silence between chunks
+);
 
 interface Config {
   ae: {
     sample_rate: number;
     base_chunk_size: number;
-    chunk_compress: number;
-    latent_dim: number;
   };
-  dp: {
-    text_emb_dim: number;
-    text_dim: number;
+  ttl: {
+    chunk_compress_factor: number;
+    latent_dim: number;
   };
 }
 
@@ -46,8 +47,35 @@ interface Style {
 }
 
 interface UnicodeProcessor {
-  encode: (text: string, lang: string) => { tokens: number[]; length: number };
+  call: (
+    textList: string[],
+    langList: string[],
+  ) => { textIds: number[][]; textMask: number[][][] };
 }
+
+const lengthToMask = (lengths: number[], maxLen?: number) => {
+  const resolvedMaxLen = maxLen ?? Math.max(...lengths);
+  const mask: number[][][] = [];
+  for (let i = 0; i < lengths.length; i++) {
+    const row: number[] = [];
+    for (let j = 0; j < resolvedMaxLen; j++) {
+      row.push(j < lengths[i] ? 1.0 : 0.0);
+    }
+    mask.push([row]);
+  }
+  return mask;
+};
+
+const getLatentMask = (
+  wavLengths: number[],
+  chunkSize: number,
+  latentLen: number,
+) => {
+  const latentLengths = wavLengths.map((len) =>
+    Math.floor((len + chunkSize - 1) / chunkSize),
+  );
+  return lengthToMask(latentLengths, latentLen);
+};
 
 class SupertonicTTS {
   private config: Config | null = null;
@@ -66,8 +94,7 @@ class SupertonicTTS {
     try {
       console.log("Initializing Supertonic TTS...");
 
-      // Load configuration
-      const configPath = path.join(supertonicOnnxDir, "config.json");
+      const configPath = path.join(supertonicOnnxDir, "tts.json");
       if (!fs.existsSync(configPath)) {
         throw new Error(
           `Config file not found at ${configPath}. Please download Supertonic models first.`,
@@ -76,25 +103,22 @@ class SupertonicTTS {
       this.config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
       this.sampleRate = this.config!.ae.sample_rate;
 
-      // Load text processor
       await this.loadTextProcessor();
 
-      // Load ONNX models
       console.log("Loading ONNX models...");
       this.dpSession = await ort.InferenceSession.create(
-        path.join(supertonicOnnxDir, "dp.onnx"),
+        path.join(supertonicOnnxDir, "duration_predictor.onnx"),
       );
       this.textEncSession = await ort.InferenceSession.create(
-        path.join(supertonicOnnxDir, "text_enc.onnx"),
+        path.join(supertonicOnnxDir, "text_encoder.onnx"),
       );
       this.vectorEstSession = await ort.InferenceSession.create(
-        path.join(supertonicOnnxDir, "vector_est.onnx"),
+        path.join(supertonicOnnxDir, "vector_estimator.onnx"),
       );
       this.vocoderSession = await ort.InferenceSession.create(
         path.join(supertonicOnnxDir, "vocoder.onnx"),
       );
 
-      // Load voice style
       await this.loadVoiceStyle(supertonicVoiceStyle);
 
       this.initialized = true;
@@ -108,34 +132,110 @@ class SupertonicTTS {
   }
 
   private async loadTextProcessor() {
-    // Load unicode_lookup.json for text processing
-    const unicodeLookupPath = path.join(
+    const unicodeIndexerPath = path.join(
       supertonicOnnxDir,
-      "unicode_lookup.json",
+      "unicode_indexer.json",
     );
-    if (!fs.existsSync(unicodeLookupPath)) {
-      throw new Error(`Unicode lookup file not found at ${unicodeLookupPath}`);
+    if (!fs.existsSync(unicodeIndexerPath)) {
+      throw new Error(`Unicode indexer file not found at ${unicodeIndexerPath}`);
     }
 
-    const unicodeLookup = JSON.parse(
-      fs.readFileSync(unicodeLookupPath, "utf-8"),
+    const unicodeIndexer = JSON.parse(
+      fs.readFileSync(unicodeIndexerPath, "utf-8"),
     );
 
+    const normalizeText = (text: string, lang: string) => {
+      let normalized = text.normalize("NFKD");
+
+      const emojiPattern =
+        /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E6}-\u{1F1FF}]+/gu;
+      normalized = normalized.replace(emojiPattern, "");
+
+      const replacements: Record<string, string> = {
+        "–": "-",
+        "‑": "-",
+        "—": "-",
+        "_": " ",
+        "\u201C": '"',
+        "\u201D": '"',
+        "\u2018": "'",
+        "\u2019": "'",
+        "´": "'",
+        "`": "'",
+        "[": " ",
+        "]": " ",
+        "|": " ",
+        "/": " ",
+        "#": " ",
+        "→": " ",
+        "←": " ",
+      };
+      for (const [key, value] of Object.entries(replacements)) {
+        normalized = replaceAllString(normalized, key, value);
+      }
+
+      normalized = normalized.replace(/[♥☆♡©\\]/g, "");
+
+      const exprReplacements: Record<string, string> = {
+        "@": " at ",
+        "e.g.,": "for example, ",
+        "i.e.,": "that is, ",
+      };
+      for (const [key, value] of Object.entries(exprReplacements)) {
+        normalized = replaceAllString(normalized, key, value);
+      }
+
+      normalized = normalized
+        .replace(/ ,/g, ",")
+        .replace(/ \./g, ".")
+        .replace(/ !/g, "!")
+        .replace(/ \?/g, "?")
+        .replace(/ ;/g, ";")
+        .replace(/ :/g, ":")
+        .replace(/ '/g, "'");
+
+      while (normalized.includes('""')) {
+        normalized = normalized.replace('""', '"');
+      }
+      while (normalized.includes("''")) {
+        normalized = normalized.replace("''", "'");
+      }
+      while (normalized.includes("``")) {
+        normalized = normalized.replace("``", "`");
+      }
+
+      normalized = normalized.replace(/\s+/g, " ").trim();
+
+      if (!/[.!?;:,'\"')\]}…。」』】〉》›»]$/.test(normalized)) {
+        normalized += ".";
+      }
+
+      return `<${lang}>${normalized}</${lang}>`;
+    };
+
+    const textToUnicodeValues = (text: string) =>
+      Array.from(text).map((char) => char.charCodeAt(0));
+
     this.textProcessor = {
-      encode: (text: string, lang: string) => {
-        const tokens: number[] = [];
-        for (const char of text) {
-          const key = `${char}:${lang}`;
-          if (unicodeLookup[key] !== undefined) {
-            tokens.push(unicodeLookup[key]);
-          } else if (unicodeLookup[char] !== undefined) {
-            tokens.push(unicodeLookup[char]);
-          } else {
-            // Unknown character, use space token
-            tokens.push(unicodeLookup[" "] || 0);
+      call: (textList: string[], langList: string[]) => {
+        const processed = textList.map((text, idx) =>
+          normalizeText(text, langList[idx]),
+        );
+        const lengths = processed.map((text) => text.length);
+        const maxLen = Math.max(...lengths);
+
+        const textIds: number[][] = [];
+        for (let i = 0; i < processed.length; i++) {
+          const row = new Array(maxLen).fill(0);
+          const unicodeVals = textToUnicodeValues(processed[i]);
+          for (let j = 0; j < unicodeVals.length; j++) {
+            row[j] = unicodeIndexer[unicodeVals[j]] ?? 0;
           }
+          textIds.push(row);
         }
-        return { tokens, length: tokens.length };
+
+        const textMask = lengthToMask(lengths, maxLen);
+        return { textIds, textMask };
       },
     };
   }
@@ -151,19 +251,14 @@ class SupertonicTTS {
     }
 
     const styleData = JSON.parse(fs.readFileSync(voiceStylePath, "utf-8"));
+    const ttlDims = styleData.style_ttl.dims as number[];
+    const dpDims = styleData.style_dp.dims as number[];
+    const ttlData = styleData.style_ttl.data.flat(Infinity) as number[];
+    const dpData = styleData.style_dp.data.flat(Infinity) as number[];
 
-    // Convert style data to tensors
     this.style = {
-      ttl: new ort.Tensor(
-        "float32",
-        Float32Array.from(styleData.ttl.flat(2)),
-        styleData.ttl_shape,
-      ),
-      dp: new ort.Tensor(
-        "float32",
-        Float32Array.from(styleData.dp.flat(2)),
-        styleData.dp_shape,
-      ),
+      ttl: new ort.Tensor("float32", Float32Array.from(ttlData), ttlDims),
+      dp: new ort.Tensor("float32", Float32Array.from(dpData), dpDims),
     };
   }
 
@@ -181,7 +276,6 @@ class SupertonicTTS {
         continue;
       }
 
-      // Split by sentences
       const sentences = paragraph.match(/[^.!?]+[.!?]+/g) || [paragraph];
       let currentChunk = "";
 
@@ -212,90 +306,117 @@ class SupertonicTTS {
       throw new Error("Supertonic TTS not initialized");
     }
 
-    // Encode text
-    const encoded = this.textProcessor.encode(text, lang);
-    const textTokens = new ort.Tensor(
+    const { textIds, textMask } = this.textProcessor.call([text], [lang]);
+    const textIdsTensor = new ort.Tensor(
       "int64",
-      BigInt64Array.from(encoded.tokens.map((t) => BigInt(t))),
-      [1, encoded.length],
+      BigInt64Array.from(textIds.flat().map((value) => BigInt(value))),
+      [1, textIds[0].length],
     );
-    const textLengths = new ort.Tensor(
-      "int64",
-      BigInt64Array.from([BigInt(encoded.length)]),
-      [1],
+    const textMaskTensor = new ort.Tensor(
+      "float32",
+      Float32Array.from(textMask.flat(2)),
+      [1, 1, textMask[0][0].length],
     );
 
-    // Text encoding
-    const textEncFeeds = {
-      text: textTokens,
-      text_lengths: textLengths,
-      ttl: this.style.ttl,
-    };
-    const textEncResults = await this.textEncSession!.run(textEncFeeds);
-    const textEmb = textEncResults.text_emb;
-
-    // Duration prediction
-    const dpFeeds = {
-      text_emb: textEmb,
-      text_lengths: textLengths,
-      dp_style: this.style.dp,
-    };
-    const dpResults = await this.dpSession!.run(dpFeeds);
-    const duration = dpResults.duration_norm;
+    const dpResults = await this.dpSession!.run({
+      text_ids: textIdsTensor,
+      style_dp: this.style.dp,
+      text_mask: textMaskTensor,
+    });
+    const duration = dpResults.duration as ort.Tensor;
     const durationData = duration.data as Float32Array;
-    const totalDuration = Array.from(durationData).reduce((a, b) => a + b, 0);
-
-    // Sample noisy latent
-    const latentLen = Math.ceil(
-      (totalDuration * this.config.ae.sample_rate) /
-        this.config.ae.base_chunk_size /
-        this.config.ae.chunk_compress,
+    const adjustedDuration = Float32Array.from(durationData, (value) =>
+      value / supertonicSpeed,
     );
-    const latentSize = latentLen * this.config.ae.latent_dim;
-    const noisyLatent = Float32Array.from(
-      { length: latentSize },
-      () => Math.random() * 2 - 1,
+
+    const textEncResults = await this.textEncSession!.run({
+      text_ids: textIdsTensor,
+      style_ttl: this.style.ttl,
+      text_mask: textMaskTensor,
+    });
+    const textEmb = textEncResults.text_emb as ort.Tensor;
+
+    const wavLengths = Array.from(adjustedDuration).map((value) =>
+      Math.floor(value * this.sampleRate),
     );
-    const xt = new ort.Tensor("float32", noisyLatent, [
-      1,
-      latentLen,
-      this.config.ae.latent_dim,
-    ]);
+    const wavLenMax = Math.max(...wavLengths);
+    const chunkSize =
+      this.config.ae.base_chunk_size * this.config.ttl.chunk_compress_factor;
+    const latentLen = Math.floor((wavLenMax + chunkSize - 1) / chunkSize);
+    const latentDim =
+      this.config.ttl.latent_dim * this.config.ttl.chunk_compress_factor;
 
-    // Vector estimation (denoising)
-    for (let step = 0; step < supertonicTotalStep; step++) {
-      const t = new ort.Tensor(
-        "float32",
-        Float32Array.from([step / supertonicTotalStep]),
-        [1],
-      );
-      const vectorEstFeeds = {
-        xt: xt,
-        text_emb: textEmb,
-        duration: duration,
-        t: t,
-        ttl: this.style.ttl,
-      };
-      const vectorEstResults = await this.vectorEstSession!.run(vectorEstFeeds);
-      const v = vectorEstResults.v as ort.Tensor;
-
-      // Update xt: xt = xt - v * dt
-      const dt = 1 / supertonicTotalStep;
-      const xtData = xt.data as Float32Array;
-      const vData = v.data as Float32Array;
-      for (let i = 0; i < xtData.length; i++) {
-        xtData[i] = xtData[i] - vData[i] * dt;
+    const noisyLatent = new Float32Array(latentDim * latentLen);
+    for (let d = 0; d < latentDim; d++) {
+      for (let t = 0; t < latentLen; t++) {
+        const eps = 1e-10;
+        const u1 = Math.max(eps, Math.random());
+        const u2 = Math.random();
+        const randNormal =
+          Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+        noisyLatent[d * latentLen + t] = randNormal;
       }
     }
 
-    // Vocoder
-    const vocoderFeeds = { latent: xt };
-    const vocoderResults = await this.vocoderSession!.run(vocoderFeeds);
+    const latentMask = getLatentMask(wavLengths, chunkSize, latentLen);
+    for (let t = 0; t < latentLen; t++) {
+      const maskValue = latentMask[0][0][t];
+      for (let d = 0; d < latentDim; d++) {
+        noisyLatent[d * latentLen + t] *= maskValue;
+      }
+    }
+
+    let noisyLatentTensor = new ort.Tensor(
+      "float32",
+      noisyLatent,
+      [1, latentDim, latentLen],
+    );
+    const latentMaskTensor = new ort.Tensor(
+      "float32",
+      Float32Array.from(latentMask.flat(2)),
+      [1, 1, latentLen],
+    );
+    const totalStepTensor = new ort.Tensor(
+      "float32",
+      Float32Array.from([supertonicTotalStep]),
+      [1],
+    );
+
+    for (let step = 0; step < supertonicTotalStep; step++) {
+      const currentStepTensor = new ort.Tensor(
+        "float32",
+        Float32Array.from([step]),
+        [1],
+      );
+      const vectorEstResults = await this.vectorEstSession!.run({
+        noisy_latent: noisyLatentTensor,
+        text_emb: textEmb,
+        style_ttl: this.style.ttl,
+        text_mask: textMaskTensor,
+        latent_mask: latentMaskTensor,
+        total_step: totalStepTensor,
+        current_step: currentStepTensor,
+      });
+      const denoisedLatent = vectorEstResults.denoised_latent as ort.Tensor;
+      noisyLatentTensor = new ort.Tensor(
+        "float32",
+        denoisedLatent.data as Float32Array,
+        [1, latentDim, latentLen],
+      );
+    }
+
+    const vocoderResults = await this.vocoderSession!.run({
+      latent: noisyLatentTensor,
+    });
     const wav = vocoderResults.wav_tts as ort.Tensor;
+    const totalDuration = Array.from(adjustedDuration).reduce(
+      (sum, value) => sum + value,
+      0,
+    );
 
     return {
       wav: wav.data as Float32Array,
-      duration: totalDuration / supertonicSpeed,
+      duration: totalDuration,
     };
   }
 
@@ -304,7 +425,6 @@ class SupertonicTTS {
   ): Promise<{ audioPath: string; duration: number }> {
     await this.initialize();
 
-    // Chunk text for better handling of long texts
     const maxLen = supertonicLanguage === "ko" ? 120 : 300;
     const chunks = this.chunkText(text, maxLen);
 
@@ -321,7 +441,6 @@ class SupertonicTTS {
 
       const result = await this.synthesizeChunk(chunk, supertonicLanguage);
 
-      // Add silence between chunks
       if (i > 0 && supertonicSilenceDuration > 0) {
         const silenceSamples = Math.floor(
           supertonicSilenceDuration * this.sampleRate,
@@ -340,12 +459,10 @@ class SupertonicTTS {
       totalDuration += result.duration;
     }
 
-    // Save to WAV file
     const now = Date.now();
     const outputPath = path.join(ttsDir, `supertonic_${now}.wav`);
     this.writeWavFile(outputPath, concatenatedWav, this.sampleRate);
 
-    // Get actual duration from file
     const actualDuration = await getAudioDurationInSeconds(outputPath);
 
     console.log(
@@ -360,36 +477,30 @@ class SupertonicTTS {
     audioData: Float32Array,
     sampleRate: number,
   ) {
-    // Convert float32 to int16
     const int16Data = new Int16Array(audioData.length);
     for (let i = 0; i < audioData.length; i++) {
       const s = Math.max(-1, Math.min(1, audioData[i]));
       int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
     }
 
-    // Create WAV header
     const buffer = Buffer.alloc(44 + int16Data.length * 2);
 
-    // RIFF header
     buffer.write("RIFF", 0);
     buffer.writeUInt32LE(36 + int16Data.length * 2, 4);
     buffer.write("WAVE", 8);
 
-    // fmt chunk
     buffer.write("fmt ", 12);
-    buffer.writeUInt32LE(16, 16); // fmt chunk size
-    buffer.writeUInt16LE(1, 20); // PCM
-    buffer.writeUInt16LE(1, 22); // mono
+    buffer.writeUInt32LE(16, 16);
+    buffer.writeUInt16LE(1, 20);
+    buffer.writeUInt16LE(1, 22);
     buffer.writeUInt32LE(sampleRate, 24);
-    buffer.writeUInt32LE(sampleRate * 2, 28); // byte rate
-    buffer.writeUInt16LE(2, 32); // block align
-    buffer.writeUInt16LE(16, 34); // bits per sample
+    buffer.writeUInt32LE(sampleRate * 2, 28);
+    buffer.writeUInt16LE(2, 32);
+    buffer.writeUInt16LE(16, 34);
 
-    // data chunk
     buffer.write("data", 36);
     buffer.writeUInt32LE(int16Data.length * 2, 40);
 
-    // Write audio data
     for (let i = 0; i < int16Data.length; i++) {
       buffer.writeInt16LE(int16Data[i], 44 + i * 2);
     }
@@ -398,7 +509,6 @@ class SupertonicTTS {
   }
 }
 
-// Singleton instance
 let supertonicInstance: SupertonicTTS | null = null;
 
 if (ttsServer === "supertonic") {
