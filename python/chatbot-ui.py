@@ -405,14 +405,14 @@ def handle_client(client_socket, addr, whisplay):
                                 camera_thread.stop()
                                 camera_thread = None
                             camera_mode = False
-                        
-                          if (text is not None) or (status is not None) or (emoji is not None) or \
-                              (battery_level is not None) or (battery_color is not None) or \
-                              (image_path is not None) or (network_connected is not None):
+
+                    if (text is not None) or (status is not None) or (emoji is not None) or \
+                       (battery_level is not None) or (battery_color is not None) or \
+                       (image_path is not None) or (network_connected is not None):
                         update_display_data(status=status, emoji=emoji,
                                      text=text, scroll_speed=scroll_speed,
                                      battery_level=battery_level, battery_color=battery_tuple,
-                                                 image_path=image_path, network_connected=network_connected)
+                                     image_path=image_path, network_connected=network_connected)
 
                     client_socket.send(b"OK\n")
                     if response_to_client:
