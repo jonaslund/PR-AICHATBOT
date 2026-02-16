@@ -13,7 +13,11 @@ import {
   getCurrentStatus,
   onCameraCapture,
 } from "../device/display";
-import { recordAudioManually, recordFileFormat } from "../device/audio";
+import {
+  recordAudio,
+  recordAudioManually,
+  recordFileFormat,
+} from "../device/audio";
 import {
   recognizeAudio,
   chatWithLLMStream,
@@ -26,6 +30,7 @@ import { getLatestDisplayImg, setLatestCapturedImg } from "../utils/image";
 import dotEnv from "dotenv";
 import { getSystemPromptWithKnowledge } from "./Knowledge";
 import { enableRAG } from "../cloud-api/knowledge";
+import { WakeWordListener } from "../device/wakeword";
 
 dotEnv.config();
 
@@ -40,6 +45,20 @@ class ChatFlow {
   answerId: number = 0;
   enableCamera: boolean = false;
   knowledgePrompts: string[] = [];
+  wakeWordListener: WakeWordListener | null = null;
+  wakeSessionActive: boolean = false;
+  wakeSessionStartAt: number = 0;
+  wakeSessionLastSpeechAt: number = 0;
+  wakeSessionIdleTimeoutMs: number =
+    parseInt(process.env.WAKE_WORD_IDLE_TIMEOUT_SEC || "60") * 1000;
+  wakeRecordMaxSec: number = parseInt(
+    process.env.WAKE_WORD_RECORD_MAX_SEC || "60",
+  );
+  wakeEndKeywords: string[] = (process.env.WAKE_WORD_END_KEYWORDS || "byebye")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => item.length > 0);
+  endAfterAnswer: boolean = false;
 
   constructor(options: { enableCamera?: boolean } = {}) {
     console.log(`[${getCurrentTimeTag()}] ChatBot started.`);
@@ -69,6 +88,17 @@ class ChatFlow {
     );
     if (options?.enableCamera) {
       this.enableCamera = true;
+    }
+
+    const wakeEnabled = (process.env.WAKE_WORD_ENABLED || "").toLowerCase();
+    if (wakeEnabled === "true") {
+      this.wakeWordListener = new WakeWordListener();
+      this.wakeWordListener.on("wake", () => {
+        if (this.currentFlowName === "sleep") {
+          this.startWakeSession();
+        }
+      });
+      this.wakeWordListener.start();
     }
   }
 
@@ -105,6 +135,7 @@ class ChatFlow {
     switch (flowName) {
       case "sleep":
         this.currentFlowName = "sleep";
+        this.endAfterAnswer = false;
         onButtonPressed(() => {
           this.setCurrentFlow("listening");
         });
@@ -140,6 +171,8 @@ class ChatFlow {
       case "listening":
         this.answerId += 1;
         this.currentFlowName = "listening";
+        this.wakeSessionActive = false;
+        this.endAfterAnswer = false;
         this.currentRecordFilePath = `${
           this.recordingsDir
         }/user-${Date.now()}.${recordFileFormat}`;
@@ -159,6 +192,32 @@ class ChatFlow {
           })
           .catch((err) => {
             console.error("Error during recording:", err);
+            this.setCurrentFlow("sleep");
+          });
+        display({
+          status: "listening",
+          emoji: "😐",
+          RGB: "#00ff00",
+          text: "Listening...",
+        });
+        break;
+      case "wake_listening":
+        this.answerId += 1;
+        this.currentFlowName = "wake_listening";
+        this.currentRecordFilePath = `${
+          this.recordingsDir
+        }/user-${Date.now()}.${recordFileFormat}`;
+        onButtonPressed(() => {
+          this.setCurrentFlow("listening");
+        });
+        onButtonReleased(noop);
+        recordAudio(this.currentRecordFilePath, this.wakeRecordMaxSec)
+          .then(() => {
+            this.setCurrentFlow("asr");
+          })
+          .catch((err) => {
+            console.error("Error during auto recording:", err);
+            this.endWakeSession();
             this.setCurrentFlow("sleep");
           });
         display({
@@ -190,10 +249,23 @@ class ChatFlow {
             if (result) {
               console.log("Audio recognized result:", result);
               this.asrText = result;
+              if (this.wakeSessionActive) {
+                this.wakeSessionLastSpeechAt = Date.now();
+                this.endAfterAnswer = this.shouldEndAfterAnswer(result);
+              }
               display({ status: "recognizing", text: result });
               this.setCurrentFlow("answer");
             } else {
-              this.setCurrentFlow("sleep");
+              if (this.wakeSessionActive) {
+                if (this.shouldContinueWakeSession()) {
+                  this.setCurrentFlow("wake_listening");
+                } else {
+                  this.endWakeSession();
+                  this.setCurrentFlow("sleep");
+                }
+              } else {
+                this.setCurrentFlow("sleep");
+              }
             }
           }
         });
@@ -270,6 +342,15 @@ class ChatFlow {
           });
         getPlayEndPromise().then(() => {
           if (this.currentFlowName === "answer") {
+            if (this.wakeSessionActive) {
+              if (this.endAfterAnswer) {
+                this.endWakeSession();
+                this.setCurrentFlow("sleep");
+              } else {
+                this.setCurrentFlow("wake_listening");
+              }
+              return;
+            }
             const img = getLatestDisplayImg();
             if (img) {
               display({
@@ -298,6 +379,30 @@ class ChatFlow {
         console.error("Unknown flow name:", flowName);
         break;
     }
+  };
+
+  startWakeSession = (): void => {
+    this.wakeSessionActive = true;
+    this.wakeSessionStartAt = Date.now();
+    this.wakeSessionLastSpeechAt = this.wakeSessionStartAt;
+    this.endAfterAnswer = false;
+    this.setCurrentFlow("wake_listening");
+  };
+
+  endWakeSession = (): void => {
+    this.wakeSessionActive = false;
+    this.endAfterAnswer = false;
+  };
+
+  shouldContinueWakeSession = (): boolean => {
+    if (!this.wakeSessionActive) return false;
+    const last = this.wakeSessionLastSpeechAt || this.wakeSessionStartAt;
+    return Date.now() - last < this.wakeSessionIdleTimeoutMs;
+  };
+
+  shouldEndAfterAnswer = (text: string): boolean => {
+    const lower = text.toLowerCase();
+    return this.wakeEndKeywords.some((keyword) => keyword && lower.includes(keyword));
   };
 }
 

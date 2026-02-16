@@ -66,6 +66,7 @@ export enum VisionServer {
   volcengine = "volcengine",
 }
 
+
 export interface FunctionCall {
   function: {
     arguments: string;
