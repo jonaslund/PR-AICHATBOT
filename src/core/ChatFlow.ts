@@ -12,9 +12,9 @@ import { recordingsDir } from "../utils/dir";
 import dotEnv from "dotenv";
 import { WakeWordListener } from "../device/wakeword";
 import { WhisplayIMBridgeServer } from "../device/im-bridge";
-import { FlowStateMachine } from "./chatflow/stateMachine";
-import { flowStates } from "./chatflow/states";
-import { ChatFlowContext, FlowName } from "./chatflow/types";
+import { FlowStateMachine } from "./chat-flow/stateMachine";
+import { flowStates } from "./chat-flow/states";
+import { ChatFlowContext, FlowName } from "./chat-flow/types";
 
 dotEnv.config();
 
