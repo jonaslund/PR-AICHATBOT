@@ -78,11 +78,10 @@ class ChatFlow {
         if (!this.isAnswerFlow()) return;
         const fullText = sentences.join(" ");
         let emoji = "😐";
-        // const emoji = this.currentFlowName === "external_answer" ? this.currentExternalEmoji : extractEmojis(fullText);
         if (this.currentFlowName === "external_answer") {
-          emoji = this.currentExternalEmoji || extractEmojis(fullText);
+          emoji = this.currentExternalEmoji || extractEmojis(fullText) || emoji;
         } else {
-          emoji = extractEmojis(fullText) || "😐";
+          emoji = extractEmojis(fullText) || emoji;
         }
         display({
           status: "answering",
@@ -451,6 +450,7 @@ class ChatFlow {
         onButtonReleased(noop);
         const replyText = this.pendingExternalReply;
         const replyEmoji = this.pendingExternalEmoji;
+        this.currentExternalEmoji = replyEmoji;
         this.pendingExternalReply = "";
         this.pendingExternalEmoji = "";
         this.streamExternalReply(replyText, replyEmoji);
