@@ -81,10 +81,10 @@ const recordAudio = (
       "silence",
       "1",
       "0.1",
-      "60%",
+      "30%",
       "1",
       "1.0",
-      "60%",
+      "30%",
     ];
     console.log(`Starting recording, maximum ${duration} seconds...`);
     currentRecordingReject = reject;
