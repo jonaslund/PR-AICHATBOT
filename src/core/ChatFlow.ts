@@ -65,6 +65,7 @@ class ChatFlow {
   endAfterAnswer: boolean = false;
   whisplayIMBridge: WhisplayIMBridgeServer | null = null;
   pendingExternalReply: string = "";
+  pendingExternalEmoji: string = "";
 
   constructor(options: { enableCamera?: boolean } = {}) {
     console.log(`[${getCurrentTimeTag()}] ChatBot started.`);
@@ -109,8 +110,9 @@ class ChatFlow {
 
     if (isImMode) {
       this.whisplayIMBridge = new WhisplayIMBridgeServer();
-      this.whisplayIMBridge.on("reply", (reply: string) => {
-        this.pendingExternalReply = reply;
+      this.whisplayIMBridge.on("reply", (payload: { reply: string; emoji?: string }) => {
+        this.pendingExternalReply = payload.reply;
+        this.pendingExternalEmoji = payload.emoji || "";
         this.setCurrentFlow("external_answer");
       });
       this.whisplayIMBridge.start();
@@ -430,6 +432,9 @@ class ChatFlow {
         display({
           status: "answering...",
           RGB: "#00c8a3",
+          ...(this.pendingExternalEmoji
+            ? { emoji: this.pendingExternalEmoji }
+            : {}),
         });
         onButtonPressed(() => {
           this.streamResponser.stop();
@@ -437,8 +442,10 @@ class ChatFlow {
         });
         onButtonReleased(noop);
         const replyText = this.pendingExternalReply;
+        const replyEmoji = this.pendingExternalEmoji;
         this.pendingExternalReply = "";
-        this.streamExternalReply(replyText);
+        this.pendingExternalEmoji = "";
+        this.streamExternalReply(replyText, replyEmoji);
         this.streamResponser.getPlayEndPromise().then(() => {
           if (this.currentFlowName !== "external_answer") return;
           if (this.wakeSessionActive) {
@@ -463,10 +470,17 @@ class ChatFlow {
     return this.currentFlowName === "answer" || this.currentFlowName === "external_answer";
   };
 
-  streamExternalReply = async (text: string): Promise<void> => {
+  streamExternalReply = async (text: string, emoji?: string): Promise<void> => {
     if (!text) {
       this.streamResponser.endPartial();
       return;
+    }
+    if (emoji) {
+      display({
+        status: "answering",
+        emoji,
+        scroll_speed: 3,
+      });
     }
     const { sentences, remaining } = splitSentences(text);
     const parts = [...sentences];

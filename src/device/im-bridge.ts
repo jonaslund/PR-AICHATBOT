@@ -7,6 +7,7 @@ dotenv.config();
 type WhisplayIMPayload = {
   message?: string;
   messages?: Array<{ role: string; content: string }>;
+  emoji?: string;
 };
 
 type PendingPoll = {
@@ -80,7 +81,7 @@ export class WhisplayIMBridgeServer extends EventEmitter {
           if (pathname === this.sendPath) {
             const reply = payload.reply || payload.message || "";
             if (reply) {
-              this.emit("reply", reply);
+              this.emit("reply", { reply, emoji: payload.emoji || "" });
             }
             res.statusCode = 200;
             res.setHeader("Content-Type", "application/json");

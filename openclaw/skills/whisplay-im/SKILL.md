@@ -52,7 +52,7 @@ curl -X GET \
 curl -X POST \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"reply":"Hello from OpenClaw"}' \
+  -d '{"reply":"Hello from OpenClaw","emoji":"🦞"}' \
   http://<device-host>:18888/whisplay-im/send
 ```
 
@@ -60,6 +60,7 @@ curl -X POST \
 
 - `messages` is optional; use it for context routing.
 - `poll` returns an empty payload if no messages are available.
+- `send` supports optional `emoji` to control the device display.
 
 ## Ideas to try
 
