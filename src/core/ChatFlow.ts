@@ -73,7 +73,7 @@ class ChatFlow {
     this.streamResponser = new StreamResponser(
       ttsProcessor,
       (sentences: string[]) => {
-        if (this.currentFlowName !== "answer") return;
+        if (!this.isAnswerFlow()) return;
         const fullText = sentences.join(" ");
         display({
           status: "answering",
@@ -84,7 +84,7 @@ class ChatFlow {
         });
       },
       (text: string) => {
-        if (this.currentFlowName !== "answer") return;
+        if (!this.isAnswerFlow()) return;
         display({
           status: "answering",
           text: text || undefined,
@@ -436,9 +436,9 @@ class ChatFlow {
           this.setCurrentFlow("listening");
         });
         onButtonReleased(noop);
-        this.streamResponser.partial(this.pendingExternalReply);
-        this.streamResponser.endPartial();
+        const replyText = this.pendingExternalReply;
         this.pendingExternalReply = "";
+        this.streamExternalReply(replyText);
         this.streamResponser.getPlayEndPromise().then(() => {
           if (this.currentFlowName !== "external_answer") return;
           if (this.wakeSessionActive) {
@@ -457,6 +457,27 @@ class ChatFlow {
         console.error("Unknown flow name:", flowName);
         break;
     }
+  };
+
+  isAnswerFlow = (): boolean => {
+    return this.currentFlowName === "answer" || this.currentFlowName === "external_answer";
+  };
+
+  streamExternalReply = async (text: string): Promise<void> => {
+    if (!text) {
+      this.streamResponser.endPartial();
+      return;
+    }
+    const { sentences, remaining } = splitSentences(text);
+    const parts = [...sentences];
+    if (remaining.trim()) {
+      parts.push(remaining);
+    }
+    for (const part of parts) {
+      this.streamResponser.partial(part);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    this.streamResponser.endPartial();
   };
 
   startWakeSession = (): void => {
