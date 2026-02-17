@@ -66,6 +66,7 @@ class ChatFlow {
   whisplayIMBridge: WhisplayIMBridgeServer | null = null;
   pendingExternalReply: string = "";
   pendingExternalEmoji: string = "";
+  currentExternalEmoji: string = "";
 
   constructor(options: { enableCamera?: boolean } = {}) {
     console.log(`[${getCurrentTimeTag()}] ChatBot started.`);
@@ -76,10 +77,16 @@ class ChatFlow {
       (sentences: string[]) => {
         if (!this.isAnswerFlow()) return;
         const fullText = sentences.join(" ");
-        const emoji = this.currentFlowName === "external_answer" ? this.pendingExternalEmoji : extractEmojis(fullText);
+        let emoji = "😐";
+        // const emoji = this.currentFlowName === "external_answer" ? this.currentExternalEmoji : extractEmojis(fullText);
+        if (this.currentFlowName === "external_answer") {
+          emoji = this.currentExternalEmoji || extractEmojis(fullText);
+        } else {
+          emoji = extractEmojis(fullText) || "😐";
+        }
         display({
           status: "answering",
-          emoji: emoji || "😊",
+          emoji,
           text: fullText,
           RGB: "#0000ff",
           scroll_speed: 3,
