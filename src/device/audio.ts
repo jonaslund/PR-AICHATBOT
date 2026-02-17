@@ -1,4 +1,4 @@
-import { exec, spawn, ChildProcess } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import { isEmpty, noop, set } from "lodash";
 import dotenv from "dotenv";
 import { ttsServer, asrServer } from "../cloud-api/server";
@@ -67,17 +67,49 @@ const recordAudio = (
   duration: number = 10
 ): Promise<string> => {
   return new Promise((resolve, reject) => {
-    const cmd = `sox -t alsa default -t ${recordFileFormat} -c 1 -r 16000 ${outputPath} silence 1 0.1 60% 1 1.0 60%`;
+    const args = [
+      "-t",
+      "alsa",
+      "default",
+      "-t",
+      recordFileFormat,
+      "-c",
+      "1",
+      "-r",
+      "16000",
+      outputPath,
+      "silence",
+      "1",
+      "0.1",
+      "60%",
+      "1",
+      "1.0",
+      "60%",
+    ];
     console.log(`Starting recording, maximum ${duration} seconds...`);
-    const recordingProcess = exec(cmd, (err, stdout, stderr) => {
-      currentRecordingReject = reject;
-      if (err) {
+    currentRecordingReject = reject;
+    const recordingProcess = spawn("sox", args);
+
+    recordingProcess.on("error", (err) => {
+      killAllRecordingProcesses();
+      reject(err);
+    });
+
+    recordingProcess.stdout?.on("data", (data) => {
+      console.log(data.toString());
+    });
+    recordingProcess.stderr?.on("data", (data) => {
+      console.error(data.toString());
+    });
+
+    recordingProcess.on("exit", (code) => {
+      if (code && code !== 0) {
         killAllRecordingProcesses();
-        reject(stderr);
-      } else {
-        resolve(outputPath);
-        killAllRecordingProcesses();
+        reject(code);
+        return;
       }
+      resolve(outputPath);
+      killAllRecordingProcesses();
     });
     recordingProcessList.push(recordingProcess);
 
