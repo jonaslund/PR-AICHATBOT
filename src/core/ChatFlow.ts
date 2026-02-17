@@ -23,6 +23,7 @@ import {
   chatWithLLMStream,
   ttsProcessor,
 } from "../cloud-api/server";
+import { llmServer } from "../cloud-api/llm";
 import { extractEmojis } from "../utils";
 import { StreamResponser } from "./StreamResponsor";
 import { cameraDir, recordingsDir } from "../utils/dir";
@@ -31,6 +32,9 @@ import dotEnv from "dotenv";
 import { getSystemPromptWithKnowledge } from "./Knowledge";
 import { enableRAG } from "../cloud-api/knowledge";
 import { WakeWordListener } from "../device/wakeword";
+import { LLMServer } from "../type";
+import { WhisplayIMBridgeServer } from "../device/im-bridge";
+import { sendWhisplayIMMessage } from "../cloud-api/openclaw/openclaw-llm";
 
 dotEnv.config();
 
@@ -59,6 +63,8 @@ class ChatFlow {
     .map((item) => item.trim().toLowerCase())
     .filter((item) => item.length > 0);
   endAfterAnswer: boolean = false;
+  whisplayIMBridge: WhisplayIMBridgeServer | null = null;
+  pendingExternalReply: string = "";
 
   constructor(options: { enableCamera?: boolean } = {}) {
     console.log(`[${getCurrentTimeTag()}] ChatBot started.`);
@@ -99,6 +105,15 @@ class ChatFlow {
         }
       });
       this.wakeWordListener.start();
+    }
+
+    if (llmServer === LLMServer.whisplayim) {
+      this.whisplayIMBridge = new WhisplayIMBridgeServer();
+      this.whisplayIMBridge.on("reply", (reply: string) => {
+        this.pendingExternalReply = reply;
+        this.setCurrentFlow("external_answer");
+      });
+      this.whisplayIMBridge.start();
     }
   }
 
@@ -277,6 +292,37 @@ class ChatFlow {
         });
         this.currentFlowName = "answer";
         const currentAnswerId = this.answerId;
+        if (llmServer === LLMServer.whisplayim) {
+          const prompt: {
+            role: "system" | "user";
+            content: string;
+          }[] = [
+            {
+              role: "user",
+              content: this.asrText,
+            },
+          ];
+          sendWhisplayIMMessage(prompt)
+            .then((ok) => {
+              if (ok) {
+                display({
+                  status: "idle",
+                  emoji: "🦞",
+                  RGB: "#000055",
+                });
+              } else {
+                display({
+                  status: "error",
+                  emoji: "⚠️",
+                  text: "OpenClaw send failed",
+                });
+              }
+            })
+            .finally(() => {
+              this.setCurrentFlow("sleep");
+            });
+          break;
+        }
         onButtonPressed(() => {
           this.setCurrentFlow("listening");
         });
@@ -374,6 +420,38 @@ class ChatFlow {
           this.setCurrentFlow("listening");
         });
         onButtonReleased(noop);
+        break;
+      case "external_answer":
+        this.currentFlowName = "external_answer";
+        if (!this.pendingExternalReply) {
+          this.setCurrentFlow("sleep");
+          break;
+        }
+        display({
+          status: "answering...",
+          RGB: "#00c8a3",
+        });
+        onButtonPressed(() => {
+          this.streamResponser.stop();
+          this.setCurrentFlow("listening");
+        });
+        onButtonReleased(noop);
+        this.streamResponser.partial(this.pendingExternalReply);
+        this.streamResponser.endPartial();
+        this.pendingExternalReply = "";
+        this.streamResponser.getPlayEndPromise().then(() => {
+          if (this.currentFlowName !== "external_answer") return;
+          if (this.wakeSessionActive) {
+            if (this.endAfterAnswer) {
+              this.endWakeSession();
+              this.setCurrentFlow("sleep");
+            } else {
+              this.setCurrentFlow("wake_listening");
+            }
+          } else {
+            this.setCurrentFlow("sleep");
+          }
+        });
         break;
       default:
         console.error("Unknown flow name:", flowName);

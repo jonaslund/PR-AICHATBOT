@@ -7,6 +7,7 @@ import ollamaLLM from "./local/ollama-llm";
 import geminiLLM from "./gemini/gemini-llm";
 import grokLLM from "./grok/grok-llm";
 import llm8850LLM from "./local/llm8850-llm";
+import whisplayIMLLM from "./openclaw/openclaw-llm";
 import {
   ChatWithLLMStreamFunction,
   ResetChatHistoryFunction,
@@ -45,11 +46,15 @@ switch (llmServer) {
   case LLMServer.llm8850:
     ({ chatWithLLMStream, resetChatHistory } = llm8850LLM);
     break;
+  case LLMServer.whisplayim:
+    ({ chatWithLLMStream, resetChatHistory, summaryTextWithLLM } =
+      whisplayIMLLM);
+    break;
   default:
     console.warn(
-      `unknown llm server: ${llmServer}, should be volcengine/openai/gemini/ollama/grok/llm8850`,
+      `unknown llm server: ${llmServer}, should be volcengine/openai/gemini/ollama/grok/llm8850/whisplay-im`,
     );
     break;
 }
 
-export { chatWithLLMStream, resetChatHistory, summaryTextWithLLM };
+export { chatWithLLMStream, resetChatHistory, summaryTextWithLLM, llmServer };

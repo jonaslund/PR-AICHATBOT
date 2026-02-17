@@ -31,6 +31,7 @@ export enum LLMServer {
   gemini = "gemini",
   grok = "grok",
   llm8850 = "llm8850",
+  whisplayim = "whisplay-im",
 }
 
 export enum TTSServer {
