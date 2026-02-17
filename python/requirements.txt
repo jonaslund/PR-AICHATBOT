@@ -1,6 +1,6 @@
 Pillow
 cairosvg
-numpy
+numpy<2
 spidev
 opencv-python-headless
 Flask
