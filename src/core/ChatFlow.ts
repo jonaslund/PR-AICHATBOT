@@ -1,45 +1,25 @@
-import moment from "moment";
 import {
   getCurrentTimeTag,
   getRecordFileDurationMs,
   splitSentences,
 } from "./../utils/index";
-import { compact, get, noop } from "lodash";
-import {
-  onButtonPressed,
-  onButtonReleased,
-  onButtonDoubleClick,
-  display,
-  getCurrentStatus,
-  onCameraCapture,
-} from "../device/display";
-import {
-  recordAudio,
-  recordAudioManually,
-  recordFileFormat,
-} from "../device/audio";
-import {
-  recognizeAudio,
-  chatWithLLMStream,
-  ttsProcessor,
-} from "../cloud-api/server";
+import { display } from "../device/display";
+import { recognizeAudio, ttsProcessor } from "../cloud-api/server";
 import { isImMode } from "../cloud-api/llm";
 import { extractEmojis } from "../utils";
 import { StreamResponser } from "./StreamResponsor";
-import { cameraDir, recordingsDir } from "../utils/dir";
-import { getLatestDisplayImg, setLatestCapturedImg } from "../utils/image";
+import { recordingsDir } from "../utils/dir";
 import dotEnv from "dotenv";
-import { getSystemPromptWithKnowledge } from "./Knowledge";
-import { enableRAG } from "../cloud-api/knowledge";
 import { WakeWordListener } from "../device/wakeword";
-import { LLMServer } from "../type";
 import { WhisplayIMBridgeServer } from "../device/im-bridge";
-import { sendWhisplayIMMessage } from "../cloud-api/openclaw/openclaw-llm";
+import { FlowStateMachine } from "./chatflow/stateMachine";
+import { flowStates } from "./chatflow/states";
+import { ChatFlowContext, FlowName } from "./chatflow/types";
 
 dotEnv.config();
 
-class ChatFlow {
-  currentFlowName: string = "";
+class ChatFlow implements ChatFlowContext {
+  currentFlowName: FlowName = "sleep";
   recordingsDir: string = "";
   currentRecordFilePath: string = "";
   asrText: string = "";
@@ -67,11 +47,13 @@ class ChatFlow {
   pendingExternalReply: string = "";
   pendingExternalEmoji: string = "";
   currentExternalEmoji: string = "";
+  stateMachine: FlowStateMachine;
 
   constructor(options: { enableCamera?: boolean } = {}) {
     console.log(`[${getCurrentTimeTag()}] ChatBot started.`);
     this.recordingsDir = recordingsDir;
-    this.setCurrentFlow("sleep");
+    this.stateMachine = new FlowStateMachine(this, flowStates);
+    this.transitionTo("sleep");
     this.streamResponser = new StreamResponser(
       ttsProcessor,
       (sentences: string[]) => {
@@ -117,11 +99,14 @@ class ChatFlow {
 
     if (isImMode) {
       this.whisplayIMBridge = new WhisplayIMBridgeServer();
-      this.whisplayIMBridge.on("reply", (payload: { reply: string; emoji?: string }) => {
-        this.pendingExternalReply = payload.reply;
-        this.pendingExternalEmoji = payload.emoji || "";
-        this.setCurrentFlow("external_answer");
-      });
+      this.whisplayIMBridge.on(
+        "reply",
+        (payload: { reply: string; emoji?: string }) => {
+          this.pendingExternalReply = payload.reply;
+          this.pendingExternalEmoji = payload.emoji || "";
+          this.transitionTo("external_answer");
+        },
+      );
       this.whisplayIMBridge.start();
     }
   }
@@ -154,328 +139,16 @@ class ChatFlow {
     this.partialThinking = remaining;
   };
 
-  setCurrentFlow = (flowName: string): void => {
+  transitionTo = (flowName: FlowName): void => {
     console.log(`[${getCurrentTimeTag()}] switch to:`, flowName);
-    switch (flowName) {
-      case "sleep":
-        this.currentFlowName = "sleep";
-        this.endAfterAnswer = false;
-        onButtonPressed(() => {
-          this.setCurrentFlow("listening");
-        });
-        onButtonReleased(noop);
-        // camera mode
-        if (this.enableCamera) {
-          const captureImgPath = `${cameraDir}/capture-${moment().format(
-            "YYYYMMDD-HHmmss",
-          )}.jpg`;
-          onButtonDoubleClick(() => {
-            display({
-              camera_mode: true,
-              capture_image_path: captureImgPath,
-            });
-          });
-          onCameraCapture(() => {
-            setLatestCapturedImg(captureImgPath);
-          });
-        }
-        display({
-          status: "idle",
-          emoji: "😴",
-          RGB: "#000055",
-          ...(getCurrentStatus().text === "Listening..."
-            ? {
-                text: `Long Press the button to say something${
-                  this.enableCamera ? ",\ndouble click to launch camera" : ""
-                }.`,
-              }
-            : {}),
-        });
-        break;
-      case "listening":
-        this.answerId += 1;
-        this.currentFlowName = "listening";
-        this.wakeSessionActive = false;
-        this.endAfterAnswer = false;
-        this.currentRecordFilePath = `${
-          this.recordingsDir
-        }/user-${Date.now()}.${recordFileFormat}`;
-        onButtonPressed(noop);
-        const { result, stop } = recordAudioManually(
-          this.currentRecordFilePath,
-        );
-        onButtonReleased(() => {
-          stop();
-          display({
-            RGB: "#ff6800", // yellow
-          });
-        });
-        result
-          .then(() => {
-            this.setCurrentFlow("asr");
-          })
-          .catch((err) => {
-            console.error("Error during recording:", err);
-            this.setCurrentFlow("sleep");
-          });
-        display({
-          status: "listening",
-          emoji: "😐",
-          RGB: "#00ff00",
-          text: "Listening...",
-        });
-        break;
-      case "wake_listening":
-        this.answerId += 1;
-        this.currentFlowName = "wake_listening";
-        this.currentRecordFilePath = `${
-          this.recordingsDir
-        }/user-${Date.now()}.${recordFileFormat}`;
-        onButtonPressed(() => {
-          this.setCurrentFlow("listening");
-        });
-        onButtonReleased(noop);
-        recordAudio(this.currentRecordFilePath, this.wakeRecordMaxSec)
-          .then(() => {
-            this.setCurrentFlow("asr");
-          })
-          .catch((err) => {
-            console.error("Error during auto recording:", err);
-            this.endWakeSession();
-            this.setCurrentFlow("sleep");
-          });
-        display({
-          status: "listening",
-          emoji: "😐",
-          RGB: "#00ff00",
-          text: "Listening...",
-        });
-        break;
-      case "asr":
-        this.currentFlowName = "asr";
-        display({
-          status: "recognizing",
-        });
-        onButtonDoubleClick(null);
-        Promise.race([
-          this.recognizeAudio(this.currentRecordFilePath),
-          new Promise<string>((resolve) => {
-            onButtonPressed(() => {
-              resolve("[UserPress]");
-            });
-            onButtonReleased(noop);
-          }),
-        ]).then((result) => {
-          if (this.currentFlowName !== "asr") return;
-          if (result === "[UserPress]") {
-            this.setCurrentFlow("listening");
-          } else {
-            if (result) {
-              console.log("Audio recognized result:", result);
-              this.asrText = result;
-              if (this.wakeSessionActive) {
-                this.wakeSessionLastSpeechAt = Date.now();
-                this.endAfterAnswer = this.shouldEndAfterAnswer(result);
-              }
-              display({ status: "recognizing", text: result });
-              this.setCurrentFlow("answer");
-            } else {
-              if (this.wakeSessionActive) {
-                if (this.shouldContinueWakeSession()) {
-                  this.setCurrentFlow("wake_listening");
-                } else {
-                  this.endWakeSession();
-                  this.setCurrentFlow("sleep");
-                }
-              } else {
-                this.setCurrentFlow("sleep");
-              }
-            }
-          }
-        });
-        break;
-      case "answer":
-        display({
-          status: "answering...",
-          RGB: "#00c8a3",
-        });
-        this.currentFlowName = "answer";
-        const currentAnswerId = this.answerId;
-        if (isImMode) {
-          const prompt: {
-            role: "system" | "user";
-            content: string;
-          }[] = [
-            {
-              role: "user",
-              content: this.asrText,
-            },
-          ];
-          sendWhisplayIMMessage(prompt)
-            .then((ok) => {
-              if (ok) {
-                display({
-                  status: "idle",
-                  emoji: "🦞",
-                  RGB: "#000055",
-                });
-              } else {
-                display({
-                  status: "error",
-                  emoji: "⚠️",
-                  text: "OpenClaw send failed",
-                });
-              }
-            })
-            .finally(() => {
-              this.setCurrentFlow("sleep");
-            });
-          break;
-        }
-        onButtonPressed(() => {
-          this.setCurrentFlow("listening");
-        });
-        onButtonReleased(noop);
-        const {
-          partial,
-          endPartial,
-          getPlayEndPromise,
-          stop: stopPlaying,
-        } = this.streamResponser;
-        this.partialThinking = "";
-        this.thinkingSentences = [];
-        [() => Promise.resolve().then(() => ""), getSystemPromptWithKnowledge]
-          [enableRAG ? 1 : 0](this.asrText)
-          .then((res: string) => {
-            let knowledgePrompt = res;
-            if (res) {
-              console.log("Retrieved knowledge for RAG:\n", res);
-            }
-            if (this.knowledgePrompts.includes(res)) {
-              console.log(
-                "[RAG] Knowledge prompt already used in this session, skipping to avoid repetition.",
-              );
-              knowledgePrompt = "";
-            }
-            if (knowledgePrompt) {
-              this.knowledgePrompts.push(knowledgePrompt);
-            }
-            const prompt: {
-              role: "system" | "user";
-              content: string;
-            }[] = compact([
-              knowledgePrompt
-                ? {
-                    role: "system",
-                    content: knowledgePrompt,
-                  }
-                : null,
-              {
-                role: "user",
-                content: this.asrText,
-              },
-            ]);
-            chatWithLLMStream(
-              prompt,
-              (text) => currentAnswerId === this.answerId && partial(text),
-              () => currentAnswerId === this.answerId && endPartial(),
-              (partialThinking) =>
-                currentAnswerId === this.answerId &&
-                this.partialThinkingCallback(partialThinking),
-              (functionName: string, result?: string) => {
-                if (result) {
-                  display({
-                    text: `[${functionName}]${result}`,
-                  });
-                } else {
-                  display({
-                    text: `Invoking [${functionName}]...`,
-                  });
-                }
-              },
-            );
-          });
-        getPlayEndPromise().then(() => {
-          if (this.currentFlowName === "answer") {
-            if (this.wakeSessionActive) {
-              if (this.endAfterAnswer) {
-                this.endWakeSession();
-                this.setCurrentFlow("sleep");
-              } else {
-                this.setCurrentFlow("wake_listening");
-              }
-              return;
-            }
-            const img = getLatestDisplayImg();
-            if (img) {
-              display({
-                image: img,
-              });
-              this.setCurrentFlow("image");
-            } else {
-              this.setCurrentFlow("sleep");
-            }
-          }
-        });
-        onButtonPressed(() => {
-          stopPlaying();
-          this.setCurrentFlow("listening");
-        });
-        onButtonReleased(noop);
-        break;
-      case "image":
-        onButtonPressed(() => {
-          display({ image: "" });
-          this.setCurrentFlow("listening");
-        });
-        onButtonReleased(noop);
-        break;
-      case "external_answer":
-        this.currentFlowName = "external_answer";
-        if (!this.pendingExternalReply) {
-          this.setCurrentFlow("sleep");
-          break;
-        }
-        display({
-          status: "answering...",
-          RGB: "#00c8a3",
-          ...(this.pendingExternalEmoji
-            ? { emoji: this.pendingExternalEmoji }
-            : {}),
-        });
-        onButtonPressed(() => {
-          this.streamResponser.stop();
-          this.setCurrentFlow("listening");
-        });
-        onButtonReleased(noop);
-        const replyText = this.pendingExternalReply;
-        const replyEmoji = this.pendingExternalEmoji;
-        this.currentExternalEmoji = replyEmoji;
-        this.pendingExternalReply = "";
-        this.pendingExternalEmoji = "";
-        this.streamExternalReply(replyText, replyEmoji);
-        this.streamResponser.getPlayEndPromise().then(() => {
-          if (this.currentFlowName !== "external_answer") return;
-          if (this.wakeSessionActive) {
-            if (this.endAfterAnswer) {
-              this.endWakeSession();
-              this.setCurrentFlow("sleep");
-            } else {
-              this.setCurrentFlow("wake_listening");
-            }
-          } else {
-            this.setCurrentFlow("sleep");
-          }
-        });
-        break;
-      default:
-        console.error("Unknown flow name:", flowName);
-        break;
-    }
+    this.stateMachine.transitionTo(flowName);
   };
 
   isAnswerFlow = (): boolean => {
-    return this.currentFlowName === "answer" || this.currentFlowName === "external_answer";
+    return (
+      this.currentFlowName === "answer" ||
+      this.currentFlowName === "external_answer"
+    );
   };
 
   streamExternalReply = async (text: string, emoji?: string): Promise<void> => {
@@ -507,7 +180,7 @@ class ChatFlow {
     this.wakeSessionStartAt = Date.now();
     this.wakeSessionLastSpeechAt = this.wakeSessionStartAt;
     this.endAfterAnswer = false;
-    this.setCurrentFlow("wake_listening");
+    this.transitionTo("wake_listening");
   };
 
   endWakeSession = (): void => {
