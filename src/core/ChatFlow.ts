@@ -23,7 +23,7 @@ import {
   chatWithLLMStream,
   ttsProcessor,
 } from "../cloud-api/server";
-import { llmServer } from "../cloud-api/llm";
+import { isImMode } from "../cloud-api/llm";
 import { extractEmojis } from "../utils";
 import { StreamResponser } from "./StreamResponsor";
 import { cameraDir, recordingsDir } from "../utils/dir";
@@ -107,7 +107,7 @@ class ChatFlow {
       this.wakeWordListener.start();
     }
 
-    if (llmServer === LLMServer.whisplayim) {
+    if (isImMode) {
       this.whisplayIMBridge = new WhisplayIMBridgeServer();
       this.whisplayIMBridge.on("reply", (reply: string) => {
         this.pendingExternalReply = reply;
@@ -292,7 +292,7 @@ class ChatFlow {
         });
         this.currentFlowName = "answer";
         const currentAnswerId = this.answerId;
-        if (llmServer === LLMServer.whisplayim) {
+        if (isImMode) {
           const prompt: {
             role: "system" | "user";
             content: string;
@@ -480,7 +480,9 @@ class ChatFlow {
 
   shouldEndAfterAnswer = (text: string): boolean => {
     const lower = text.toLowerCase();
-    return this.wakeEndKeywords.some((keyword) => keyword && lower.includes(keyword));
+    return this.wakeEndKeywords.some(
+      (keyword) => keyword && lower.includes(keyword),
+    );
   };
 }
 

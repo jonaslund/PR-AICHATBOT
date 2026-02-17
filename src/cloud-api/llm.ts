@@ -20,7 +20,7 @@ let chatWithLLMStream: ChatWithLLMStreamFunction = noop as any;
 let resetChatHistory: ResetChatHistoryFunction = noop as any;
 let summaryTextWithLLM: SummaryTextWithLLMFunction = async (text, _) => text;
 
-export const llmServer: LLMServer = (
+const llmServer: LLMServer = (
   process.env.LLM_SERVER || LLMServer.volcengine
 ).toLowerCase() as LLMServer;
 
@@ -57,4 +57,6 @@ switch (llmServer) {
     break;
 }
 
-export { chatWithLLMStream, resetChatHistory, summaryTextWithLLM, llmServer };
+const isImMode = llmServer === LLMServer.whisplayim;
+
+export { chatWithLLMStream, resetChatHistory, summaryTextWithLLM, isImMode };
