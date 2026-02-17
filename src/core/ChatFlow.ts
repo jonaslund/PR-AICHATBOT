@@ -76,9 +76,10 @@ class ChatFlow {
       (sentences: string[]) => {
         if (!this.isAnswerFlow()) return;
         const fullText = sentences.join(" ");
+        const emoji = this.currentFlowName === "external_answer" ? this.pendingExternalEmoji : extractEmojis(fullText);
         display({
           status: "answering",
-          emoji: extractEmojis(fullText) || "😊",
+          emoji: emoji || "😊",
           text: fullText,
           RGB: "#0000ff",
           scroll_speed: 3,
