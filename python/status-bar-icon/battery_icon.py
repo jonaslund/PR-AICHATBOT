@@ -1,4 +1,5 @@
 from utils import ColorUtils
+from icon_constants import STATUS_ICON_HEIGHT
 
 
 class BatteryStatusIcon:
@@ -8,7 +9,7 @@ class BatteryStatusIcon:
         self.battery_font = battery_font
         self.status_font_size = status_font_size
         self.battery_width = 26
-        self.battery_height = 15
+        self.battery_height = STATUS_ICON_HEIGHT
         self.corner_radius = 3
         self.line_width = 2
         self.head_width = 2
