@@ -7,6 +7,7 @@ import { ASRServer, TTSResult, TTSServer } from "../type";
 dotenv.config();
 
 const soundCardIndex = process.env.SOUND_CARD_INDEX || "1";
+const alsaOutputDevice = `hw:${soundCardIndex},0`;
 
 const voiceDetectLevel = process.env.VOICE_DETECT_LEVEL
   ? parseInt(process.env.VOICE_DETECT_LEVEL, 10)
@@ -55,7 +56,7 @@ function startPlayerProcess() {
       "-o",
       "alsa",
       "-a",
-      `hw:${soundCardIndex},0`,
+      alsaOutputDevice,
     ]);
   }
 }
@@ -90,8 +91,11 @@ export const playWakeupChime = (): Promise<void> => {
     // synth 0.14 sine 1320 vol 0.3 \
     // fade q 0.02 0.30 0.08 gain -30
 
-    const chimeProcess = spawn("play", [
+    const chimeProcess = spawn("sox", [
       "-n",
+      "-t",
+      "alsa",
+      alsaOutputDevice,
       "synth",
       "0.10",
       "sine",
@@ -273,7 +277,7 @@ const playAudioData = (params: TTSResult): Promise<void> => {
       new Promise<void>((resolve, reject) => {
         console.log("Playback duration:", audioDuration);
         player.isPlaying = true;
-        const process = spawn("play", [filePath]);
+        const process = spawn("sox", [filePath, "-t", "alsa", alsaOutputDevice]);
         process.on("close", (code: number) => {
           player.isPlaying = false;
           if (code !== 0) {
