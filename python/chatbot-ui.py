@@ -18,6 +18,7 @@ if STATUS_ICON_DIR not in sys.path:
 
 from battery_icon import BatteryStatusIcon
 from network_icon import NetworkStatusIcon
+from rag_icon import RagStatusIcon
 
 scroll_thread = None
 scroll_stop_event = threading.Event()
@@ -37,6 +38,7 @@ current_scroll_speed = 6
 current_image_path = ""
 current_image = None
 current_network_connected = None
+current_rag_icon_visible = False
 camera_mode = False
 camera_mode_button_press_time = 0
 camera_mode_button_release_time = 0
@@ -208,6 +210,7 @@ class RenderThread(threading.Thread):
             "battery_font": battery_font,
             "status_font_size": status_font_size,
             "network_connected": current_network_connected,
+            "rag_icon_visible": current_rag_icon_visible,
         }
         status_icons = self.build_status_icons(status_icon_context)
         self.render_status_icons(draw, status_icons, image_width)
@@ -225,6 +228,9 @@ class RenderThread(threading.Thread):
             icons.append(BatteryStatusIcon(battery_level, battery_color, battery_font, status_font_size))
         if context.get("network_connected"):
             icons.append(NetworkStatusIcon(status_font_size))
+        # if context.get("rag_icon_visible"):
+        #     icons.append(RagStatusIcon(status_font_size))
+        icons.append(RagStatusIcon(status_font_size))
 
         for item in sorted(status_icon_factories, key=lambda entry: entry["priority"]):
             icon_list = item["factory"](context)
@@ -256,10 +262,10 @@ class RenderThread(threading.Thread):
 
 def update_display_data(status=None, emoji=None, text=None,
                   scroll_speed=None, battery_level=None, battery_color=None, image_path=None,
-                  network_connected=None):
+                  network_connected=None, rag_icon_visible=None):
     global current_status, current_emoji, current_text, current_battery_level
     global current_battery_color, current_scroll_top, current_scroll_speed, current_image_path
-    global current_network_connected
+    global current_network_connected, current_rag_icon_visible
 
     # If text is not continuation of previous, reset scroll position
     if text is not None and not text.startswith(current_text):
@@ -269,6 +275,8 @@ def update_display_data(status=None, emoji=None, text=None,
         current_scroll_speed = scroll_speed
     if network_connected is not None:
         current_network_connected = network_connected
+    if rag_icon_visible is not None:
+        current_rag_icon_visible = rag_icon_visible
     current_status = status if status is not None else current_status
     current_emoji = emoji if emoji is not None else current_emoji
     current_text = text if text is not None else current_text
@@ -374,6 +382,7 @@ def handle_client(client_socket, addr, whisplay):
                     battery_color = content.get("battery_color", None)
                     image_path = content.get("image", None)
                     network_connected = content.get("network_connected", None)
+                    rag_icon_visible = content.get("rag_icon_visible", None)
                     capture_image_path = content.get("capture_image_path", None)
                     # boolean to enable camera mode
                     set_camera_mode = content.get("camera_mode", None)
@@ -408,11 +417,13 @@ def handle_client(client_socket, addr, whisplay):
 
                     if (text is not None) or (status is not None) or (emoji is not None) or \
                        (battery_level is not None) or (battery_color is not None) or \
-                       (image_path is not None) or (network_connected is not None):
+                              (image_path is not None) or (network_connected is not None) or \
+                              (rag_icon_visible is not None):
                         update_display_data(status=status, emoji=emoji,
                                      text=text, scroll_speed=scroll_speed,
                                      battery_level=battery_level, battery_color=battery_tuple,
-                                     image_path=image_path, network_connected=network_connected)
+                                                 image_path=image_path, network_connected=network_connected,
+                                                 rag_icon_visible=rag_icon_visible)
 
                     client_socket.send(b"OK\n")
                     if response_to_client:

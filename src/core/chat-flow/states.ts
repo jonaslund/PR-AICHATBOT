@@ -46,6 +46,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       status: "idle",
       emoji: "😴",
       RGB: "#000055",
+      rag_icon_visible: false,
       ...(getCurrentStatus().text === "Listening..."
         ? {
             text: `Long Press the button to say something${
@@ -84,6 +85,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       emoji: "😐",
       RGB: "#00ff00",
       text: "Listening...",
+      rag_icon_visible: false,
     });
   },
   wake_listening: (ctx: ChatFlowContext) => {
@@ -110,6 +112,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       emoji: "😐",
       RGB: "#00ff00",
       text: "Listening...",
+      rag_icon_visible: false,
     });
   },
   asr: (ctx: ChatFlowContext) => {
@@ -219,6 +222,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         if (knowledgePrompt) {
           ctx.knowledgePrompts.push(knowledgePrompt);
         }
+        display({
+          rag_icon_visible: Boolean(enableRAG && knowledgePrompt),
+        });
         const prompt: {
           role: "system" | "user";
           content: string;

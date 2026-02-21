@@ -16,6 +16,7 @@ interface Status {
   camera_mode: boolean;
   capture_image_path: string;
   network_connected: boolean;
+  rag_icon_visible: boolean;
 }
 
 export class WhisplayDisplay {
@@ -32,6 +33,7 @@ export class WhisplayDisplay {
     camera_mode: false,
     capture_image_path: "",
     network_connected: false,
+    rag_icon_visible: false,
   };
 
   private client = null as Socket | null;
@@ -239,6 +241,7 @@ export class WhisplayDisplay {
       battery_color,
       image,
       network_connected,
+      rag_icon_visible,
     } = {
       ...this.currentStatus,
       ...newStatus,
@@ -259,6 +262,7 @@ export class WhisplayDisplay {
     this.currentStatus.battery_color = battery_color;
     this.currentStatus.image = image;
     this.currentStatus.network_connected = network_connected;
+    this.currentStatus.rag_icon_visible = rag_icon_visible;
     
     const changedValuesObj = Object.fromEntries(changedValues);
     changedValuesObj.brightness = 100;
