@@ -38,7 +38,7 @@ class ChatFlow implements ChatFlowContext {
   wakeRecordMaxSec: number = parseInt(
     process.env.WAKE_WORD_RECORD_MAX_SEC || "60",
   );
-  wakeEndKeywords: string[] = (process.env.WAKE_WORD_END_KEYWORDS || "byebye")
+  wakeEndKeywords: string[] = (process.env.WAKE_WORD_END_KEYWORDS || "byebye,goodbye,stop,byebye").toLowerCase()
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter((item) => item.length > 0);
