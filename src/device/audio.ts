@@ -66,6 +66,49 @@ const killAllRecordingProcesses = (): void => {
   recordingProcessList.length = 0;
 };
 
+const playWakeupChime = (): Promise<void> => {
+  return new Promise((resolve) => {
+    let finished = false;
+    const done = () => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      resolve();
+    };
+
+    const chimeProcess = spawn("play", [
+      "-n",
+      "synth",
+      "0.07",
+      "sine",
+      "820",
+      ":",
+      "synth",
+      "0.08",
+      "sine",
+      "1250",
+      ":",
+      "synth",
+      "0.11",
+      "sine",
+      "1680",
+      "fade",
+      "q",
+      "0.01",
+      "0.26",
+      "0.05",
+      "vol",
+      "0.35",
+    ]);
+
+    chimeProcess.on("error", done);
+    chimeProcess.on("exit", done);
+
+    setTimeout(done, 1500);
+  });
+};
+
 const recordAudio = (
   outputPath: string,
   duration: number = 10
@@ -92,38 +135,42 @@ const recordAudio = (
     ];
     console.log(`Starting recording, maximum ${duration} seconds...`);
     currentRecordingReject = reject;
-    const recordingProcess = spawn("sox", args);
+    playWakeupChime()
+      .catch(() => {})
+      .finally(() => {
+        const recordingProcess = spawn("sox", args);
 
-    recordingProcess.on("error", (err) => {
-      killAllRecordingProcesses();
-      reject(err);
-    });
+        recordingProcess.on("error", (err) => {
+          killAllRecordingProcesses();
+          reject(err);
+        });
 
-    recordingProcess.stdout?.on("data", (data) => {
-      console.log(data.toString());
-    });
-    recordingProcess.stderr?.on("data", (data) => {
-      console.error(data.toString());
-    });
+        recordingProcess.stdout?.on("data", (data) => {
+          console.log(data.toString());
+        });
+        recordingProcess.stderr?.on("data", (data) => {
+          console.error(data.toString());
+        });
 
-    recordingProcess.on("exit", (code) => {
-      if (code && code !== 0) {
-        killAllRecordingProcesses();
-        reject(code);
-        return;
-      }
-      resolve(outputPath);
-      killAllRecordingProcesses();
-    });
-    recordingProcessList.push(recordingProcess);
+        recordingProcess.on("exit", (code) => {
+          if (code && code !== 0) {
+            killAllRecordingProcesses();
+            reject(code);
+            return;
+          }
+          resolve(outputPath);
+          killAllRecordingProcesses();
+        });
+        recordingProcessList.push(recordingProcess);
 
-    // Set a timeout to kill the recording process after the specified duration
-    setTimeout(() => {
-      if (recordingProcessList.includes(recordingProcess)) {
-        killAllRecordingProcesses();
-        resolve(outputPath);
-      }
-    }, duration * 1000);
+        // Set a timeout to kill the recording process after the specified duration
+        setTimeout(() => {
+          if (recordingProcessList.includes(recordingProcess)) {
+            killAllRecordingProcesses();
+            resolve(outputPath);
+          }
+        }, duration * 1000);
+      });
   });
 };
 
