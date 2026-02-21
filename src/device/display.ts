@@ -184,7 +184,7 @@ export class WhisplayDisplay {
             this.onCameraCaptureCallback();
           }
         } catch {
-          console.error("Failed to parse JSON from data");
+          // console.error("Failed to parse JSON from data");
         }
       });
       this.client.on("error", (err: any) => {
