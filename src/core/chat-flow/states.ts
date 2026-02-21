@@ -24,7 +24,6 @@ import { ChatFlowContext, FlowName, FlowStateHandler } from "./types";
 
 export const flowStates: Record<FlowName, FlowStateHandler> = {
   sleep: (ctx: ChatFlowContext) => {
-    ctx.endAfterAnswer = false;
     onButtonPressed(() => {
       ctx.transitionTo("listening");
     });
