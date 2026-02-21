@@ -230,7 +230,6 @@ class RenderThread(threading.Thread):
             icons.append(NetworkStatusIcon(status_font_size))
         if context.get("rag_icon_visible"):
             icons.append(RagStatusIcon(status_font_size))
-        icons.append(RagStatusIcon(status_font_size))
 
         for item in sorted(status_icon_factories, key=lambda entry: entry["priority"]):
             icon_list = item["factory"](context)
