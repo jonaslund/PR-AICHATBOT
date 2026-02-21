@@ -12,6 +12,10 @@ const voiceDetectLevel = process.env.VOICE_DETECT_LEVEL
   ? parseInt(process.env.VOICE_DETECT_LEVEL, 10)
   : 30;
 
+const wakeupChimeVolume = process.env.WAKEUP_CHIME_VOLUME
+  ? parseFloat(process.env.WAKEUP_CHIME_VOLUME)
+  : 0.18;
+
 const useWavPlayer = [TTSServer.gemini, TTSServer.piper].includes(ttsServer);
 
 export const recordFileFormat = [
@@ -99,7 +103,7 @@ const playWakeupChime = (): Promise<void> => {
       "0.26",
       "0.05",
       "vol",
-      "0.35",
+      `${wakeupChimeVolume}`,
     ]);
 
     chimeProcess.on("error", done);
