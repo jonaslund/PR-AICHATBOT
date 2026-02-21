@@ -12,9 +12,12 @@ const voiceDetectLevel = process.env.VOICE_DETECT_LEVEL
   ? parseInt(process.env.VOICE_DETECT_LEVEL, 10)
   : 30;
 
-const wakeupChimeVolume = process.env.WAKEUP_CHIME_VOLUME
+const wakeupChimeVolumeRaw = process.env.WAKEUP_CHIME_VOLUME
   ? parseFloat(process.env.WAKEUP_CHIME_VOLUME)
-  : 0.18;
+  : 0.12;
+const wakeupChimeVolume = Number.isFinite(wakeupChimeVolumeRaw)
+  ? Math.min(Math.max(wakeupChimeVolumeRaw, 0), 1)
+  : 0.12;
 
 const useWavPlayer = [TTSServer.gemini, TTSServer.piper].includes(ttsServer);
 
@@ -82,6 +85,8 @@ const playWakeupChime = (): Promise<void> => {
     };
 
     const chimeProcess = spawn("play", [
+      "-v",
+      `${wakeupChimeVolume}`,
       "-n",
       "synth",
       "0.07",
@@ -102,8 +107,6 @@ const playWakeupChime = (): Promise<void> => {
       "0.01",
       "0.26",
       "0.05",
-      "vol",
-      `${wakeupChimeVolume}`,
     ]);
 
     chimeProcess.on("error", done);
