@@ -8,6 +8,10 @@ dotenv.config();
 
 const soundCardIndex = process.env.SOUND_CARD_INDEX || "1";
 
+const voiceDetectLevel = process.env.VOICE_DETECT_LEVEL
+  ? parseInt(process.env.VOICE_DETECT_LEVEL, 10)
+  : 30;
+
 const useWavPlayer = [TTSServer.gemini, TTSServer.piper].includes(ttsServer);
 
 export const recordFileFormat = [
@@ -81,10 +85,10 @@ const recordAudio = (
       "silence",
       "1",
       "0.1",
-      "10%",
+      `${voiceDetectLevel}%`,
       "1",
       "0.7",
-      "10%",
+      `${voiceDetectLevel}%`,
     ];
     console.log(`Starting recording, maximum ${duration} seconds...`);
     currentRecordingReject = reject;

@@ -133,9 +133,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       if (result) {
         console.log("Audio recognized result:", result);
         ctx.asrText = result;
+        ctx.endAfterAnswer = ctx.shouldEndAfterAnswer(result);
         if (ctx.wakeSessionActive) {
           ctx.wakeSessionLastSpeechAt = Date.now();
-          ctx.endAfterAnswer = ctx.shouldEndAfterAnswer(result);
         }
         display({ status: "recognizing", text: result });
         ctx.transitionTo("answer");
@@ -255,7 +255,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       });
     getPlayEndPromise().then(() => {
       if (ctx.currentFlowName === "answer") {
-        if (ctx.wakeSessionActive) {
+        if (ctx.wakeSessionActive || ctx.endAfterAnswer) {
           if (ctx.endAfterAnswer) {
             ctx.endWakeSession();
             ctx.transitionTo("sleep");
@@ -311,7 +311,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     void ctx.streamExternalReply(replyText, replyEmoji);
     ctx.streamResponser.getPlayEndPromise().then(() => {
       if (ctx.currentFlowName !== "external_answer") return;
-      if (ctx.wakeSessionActive) {
+      if (ctx.wakeSessionActive || ctx.endAfterAnswer) {
         if (ctx.endAfterAnswer) {
           ctx.endWakeSession();
           ctx.transitionTo("sleep");
