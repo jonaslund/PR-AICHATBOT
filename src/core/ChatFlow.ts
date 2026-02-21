@@ -15,6 +15,7 @@ import { WhisplayIMBridgeServer } from "../device/im-bridge";
 import { FlowStateMachine } from "./chat-flow/stateMachine";
 import { flowStates } from "./chat-flow/states";
 import { ChatFlowContext, FlowName } from "./chat-flow/types";
+import { playWakeupChime } from "../device/audio";
 
 dotEnv.config();
 
@@ -48,6 +49,7 @@ class ChatFlow implements ChatFlowContext {
   pendingExternalEmoji: string = "";
   currentExternalEmoji: string = "";
   stateMachine: FlowStateMachine;
+  isFromWakeListening: boolean = false;
 
   constructor(options: { enableCamera?: boolean } = {}) {
     console.log(`[${getCurrentTimeTag()}] ChatBot started.`);
@@ -111,8 +113,8 @@ class ChatFlow implements ChatFlowContext {
     }
   }
 
-  async recognizeAudio(path: string): Promise<string> {
-    if ((await getRecordFileDurationMs(path)) < 500) {
+  async recognizeAudio(path: string, isFromAutoListening?: boolean): Promise<string> {
+    if (!isFromAutoListening && (await getRecordFileDurationMs(path)) < 500) {
       console.log("Record audio too short, skipping recognition.");
       return Promise.resolve("");
     }
@@ -180,6 +182,7 @@ class ChatFlow implements ChatFlowContext {
     this.wakeSessionStartAt = Date.now();
     this.wakeSessionLastSpeechAt = this.wakeSessionStartAt;
     this.endAfterAnswer = false;
+    playWakeupChime();
     this.transitionTo("wake_listening");
   };
 

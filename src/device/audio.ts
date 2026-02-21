@@ -12,12 +12,12 @@ const voiceDetectLevel = process.env.VOICE_DETECT_LEVEL
   ? parseInt(process.env.VOICE_DETECT_LEVEL, 10)
   : 30;
 
-const wakeupChimeVolumeRaw = process.env.WAKEUP_CHIME_VOLUME
-  ? parseFloat(process.env.WAKEUP_CHIME_VOLUME)
-  : 0.12;
-const wakeupChimeVolume = Number.isFinite(wakeupChimeVolumeRaw)
-  ? Math.min(Math.max(wakeupChimeVolumeRaw, 0), 1)
-  : 0.12;
+// const wakeupChimeVolumeRaw = process.env.WAKEUP_CHIME_VOLUME
+//   ? parseFloat(process.env.WAKEUP_CHIME_VOLUME)
+//   : 0.12;
+// const wakeupChimeVolume = Number.isFinite(wakeupChimeVolumeRaw)
+//   ? Math.min(Math.max(wakeupChimeVolumeRaw, 0), 1)
+//   : 0.12;
 
 const useWavPlayer = [TTSServer.gemini, TTSServer.piper].includes(ttsServer);
 
@@ -68,12 +68,12 @@ const killAllRecordingProcesses = (): void => {
     console.log("Killing recording process", child.pid);
     try {
       child.kill("SIGINT");
-    } catch (e) {}
+    } catch (e) { }
   });
   recordingProcessList.length = 0;
 };
 
-const playWakeupChime = (): Promise<void> => {
+export const playWakeupChime = (): Promise<void> => {
   return new Promise((resolve) => {
     let finished = false;
     const done = () => {
@@ -84,29 +84,41 @@ const playWakeupChime = (): Promise<void> => {
       resolve();
     };
 
+    //     play -n \
+    // synth 0.10 sine 720 vol 0.4 : \
+    // synth 0.12 sine 980 vol 0.35 : \
+    // synth 0.14 sine 1320 vol 0.3 \
+    // fade q 0.02 0.30 0.08 gain -30
+
     const chimeProcess = spawn("play", [
-      "-v",
-      `${wakeupChimeVolume}`,
       "-n",
       "synth",
-      "0.07",
+      "0.10",
       "sine",
-      "820",
+      "720",
+      "vol",
+      "0.4",
       ":",
       "synth",
-      "0.08",
+      "0.12",
       "sine",
-      "1250",
+      "980",
+      "vol",
+      "0.35",
       ":",
       "synth",
-      "0.11",
+      "0.14",
       "sine",
-      "1680",
+      "1320",
+      "vol",
+      "0.3",
       "fade",
       "q",
-      "0.01",
-      "0.26",
-      "0.05",
+      "0.02",
+      "0.30",
+      "0.08",
+      "gain",
+      "-30",
     ]);
 
     chimeProcess.on("error", done);
@@ -142,42 +154,38 @@ const recordAudio = (
     ];
     console.log(`Starting recording, maximum ${duration} seconds...`);
     currentRecordingReject = reject;
-    playWakeupChime()
-      .catch(() => {})
-      .finally(() => {
-        const recordingProcess = spawn("sox", args);
+    const recordingProcess = spawn("sox", args);
 
-        recordingProcess.on("error", (err) => {
-          killAllRecordingProcesses();
-          reject(err);
-        });
+    recordingProcess.on("error", (err) => {
+      killAllRecordingProcesses();
+      reject(err);
+    });
 
-        recordingProcess.stdout?.on("data", (data) => {
-          console.log(data.toString());
-        });
-        recordingProcess.stderr?.on("data", (data) => {
-          console.error(data.toString());
-        });
+    recordingProcess.stdout?.on("data", (data) => {
+      console.log(data.toString());
+    });
+    recordingProcess.stderr?.on("data", (data) => {
+      console.error(data.toString());
+    });
 
-        recordingProcess.on("exit", (code) => {
-          if (code && code !== 0) {
-            killAllRecordingProcesses();
-            reject(code);
-            return;
-          }
-          resolve(outputPath);
-          killAllRecordingProcesses();
-        });
-        recordingProcessList.push(recordingProcess);
+    recordingProcess.on("exit", (code) => {
+      if (code && code !== 0) {
+        killAllRecordingProcesses();
+        reject(code);
+        return;
+      }
+      resolve(outputPath);
+      killAllRecordingProcesses();
+    });
+    recordingProcessList.push(recordingProcess);
 
-        // Set a timeout to kill the recording process after the specified duration
-        setTimeout(() => {
-          if (recordingProcessList.includes(recordingProcess)) {
-            killAllRecordingProcesses();
-            resolve(outputPath);
-          }
-        }, duration * 1000);
-      });
+    // Set a timeout to kill the recording process after the specified duration
+    setTimeout(() => {
+      if (recordingProcessList.includes(recordingProcess)) {
+        killAllRecordingProcesses();
+        resolve(outputPath);
+      }
+    }, duration * 1000);
   });
 };
 
@@ -227,7 +235,7 @@ const stopRecording = (): void => {
     killAllRecordingProcesses();
     try {
       currentRecordingReject();
-    } catch (e) {}
+    } catch (e) { }
     console.log("Recording stopped");
   } else {
     console.log("No recording process running");
@@ -301,7 +309,7 @@ const playAudioData = (params: TTSResult): Promise<void> => {
 
     try {
       process.stdin?.write(audioBuffer);
-    } catch (e) {}
+    } catch (e) { }
     process.stdout?.on("data", (data) => console.log(data.toString()));
     process.stderr?.on("data", (data) => console.error(data.toString()));
     process.on("exit", (code) => {
@@ -326,7 +334,7 @@ const stopPlaying = (): void => {
         process.stdin?.end();
         process.kill();
       }
-    } catch {}
+    } catch { }
     player.isPlaying = false;
     // Recreate process
     setTimeout(() => {
@@ -344,7 +352,7 @@ process.on("SIGINT", () => {
       player.process.stdin?.end();
       player.process.kill();
     }
-  } catch {}
+  } catch { }
   process.exit();
 });
 

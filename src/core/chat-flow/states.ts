@@ -56,6 +56,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     });
   },
   listening: (ctx: ChatFlowContext) => {
+    ctx.isFromWakeListening = false;
     ctx.answerId += 1;
     ctx.wakeSessionActive = false;
     ctx.endAfterAnswer = false;
@@ -86,6 +87,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     });
   },
   wake_listening: (ctx: ChatFlowContext) => {
+    ctx.isFromWakeListening = true;
     ctx.answerId += 1;
     ctx.currentRecordFilePath = `${
       ctx.recordingsDir
@@ -116,7 +118,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     });
     onButtonDoubleClick(null);
     Promise.race([
-      ctx.recognizeAudio(ctx.currentRecordFilePath),
+      ctx.recognizeAudio(ctx.currentRecordFilePath, ctx.isFromWakeListening),
       new Promise<string>((resolve) => {
         onButtonPressed(() => {
           resolve("[UserPress]");

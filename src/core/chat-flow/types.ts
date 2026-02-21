@@ -32,9 +32,10 @@ export interface ChatFlowContext {
   pendingExternalReply: string;
   pendingExternalEmoji: string;
   currentExternalEmoji: string;
+  isFromWakeListening: boolean;
 
   transitionTo: (flowName: FlowName) => void;
-  recognizeAudio: (path: string) => Promise<string>;
+  recognizeAudio: (path: string, isFromAutoListening?: boolean) => Promise<string>;
   partialThinkingCallback: (partialThinking: string) => void;
   startWakeSession: () => void;
   endWakeSession: () => void;
