@@ -242,7 +242,7 @@ class RenderThread(threading.Thread):
         if not icons:
             return
         right_margin = 10
-        icon_gap = 10
+        icon_gap = 8
         cursor_x = image_width - right_margin
         for icon in icons:
             icon_width, _ = icon.measure()
