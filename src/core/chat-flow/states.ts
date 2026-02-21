@@ -49,10 +49,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       RGB: "#000055",
       ...(getCurrentStatus().text === "Listening..."
         ? {
-            text: `Long Press the button to say something${
-              ctx.enableCamera ? ",\ndouble click to launch camera" : ""
+          text: `Long Press the button to say something${ctx.enableCamera ? ",\ndouble click to launch camera" : ""
             }.`,
-          }
+        }
         : {}),
     });
   },
@@ -60,9 +59,8 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     ctx.answerId += 1;
     ctx.wakeSessionActive = false;
     ctx.endAfterAnswer = false;
-    ctx.currentRecordFilePath = `${
-      ctx.recordingsDir
-    }/user-${Date.now()}.${recordFileFormat}`;
+    ctx.currentRecordFilePath = `${ctx.recordingsDir
+      }/user-${Date.now()}.${recordFileFormat}`;
     onButtonPressed(noop);
     const { result, stop } = recordAudioManually(ctx.currentRecordFilePath);
     onButtonReleased(() => {
@@ -88,9 +86,8 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
   },
   wake_listening: (ctx: ChatFlowContext) => {
     ctx.answerId += 1;
-    ctx.currentRecordFilePath = `${
-      ctx.recordingsDir
-    }/user-${Date.now()}.${recordFileFormat}`;
+    ctx.currentRecordFilePath = `${ctx.recordingsDir
+      }/user-${Date.now()}.${recordFileFormat}`;
     onButtonPressed(() => {
       ctx.transitionTo("listening");
     });
@@ -164,11 +161,11 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         role: "system" | "user";
         content: string;
       }[] = [
-        {
-          role: "user",
-          content: ctx.asrText,
-        },
-      ];
+          {
+            role: "user",
+            content: ctx.asrText,
+          },
+        ];
       sendWhisplayIMMessage(prompt)
         .then((ok) => {
           if (ok) {
@@ -203,7 +200,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     ctx.partialThinking = "";
     ctx.thinkingSentences = [];
     [() => Promise.resolve().then(() => ""), getSystemPromptWithKnowledge]
-      [enableRAG ? 1 : 0](ctx.asrText)
+    [enableRAG ? 1 : 0](ctx.asrText)
       .then((res: string) => {
         let knowledgePrompt = res;
         if (res) {
@@ -224,9 +221,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         }[] = compact([
           knowledgePrompt
             ? {
-                role: "system",
-                content: knowledgePrompt,
-              }
+              role: "system",
+              content: knowledgePrompt,
+            }
             : null,
           {
             role: "user",
@@ -311,16 +308,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     void ctx.streamExternalReply(replyText, replyEmoji);
     ctx.streamResponser.getPlayEndPromise().then(() => {
       if (ctx.currentFlowName !== "external_answer") return;
-      if (ctx.wakeSessionActive || ctx.endAfterAnswer) {
-        if (ctx.endAfterAnswer) {
-          ctx.endWakeSession();
-          ctx.transitionTo("sleep");
-        } else {
-          ctx.transitionTo("wake_listening");
-        }
-      } else {
-        ctx.transitionTo("sleep");
-      }
+      ctx.transitionTo("sleep");
     });
   },
 };
