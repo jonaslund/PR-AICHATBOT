@@ -1,17 +1,3 @@
----
-name: whisplay-im
-description: HTTP bridge in Whisplay device for IM-style chat.
-homepage: https://github.com/PiSugar/whisplay-ai-chatbot
-metadata:
-  {
-    "openclaw": {
-      "emoji": "🤖",
-      "os": ["linux", "darwin"],
-      "requires": { "bins": ["curl"] }
-    }
-  }
----
-
 # whisplay-im Bridge
 
 ## Overview
@@ -30,6 +16,8 @@ sends replies back for TTS playback.
 
 ### Send device ASR text (inbox)
 
+This api is called by the device to push ASR text into the bridge.
+
 ```bash
 curl -X POST \
   -H "Authorization: Bearer <token>" \
@@ -40,6 +28,8 @@ curl -X POST \
 
 ### Poll for a new message
 
+This api is called by OpenClaw to poll for new messages from the device. It supports long-polling with `waitSec` parameter.
+
 ```bash
 curl -X GET \
   -H "Authorization: Bearer <token>" \
@@ -47,6 +37,8 @@ curl -X GET \
 ```
 
 ### Send reply to device
+
+This api is called by OpenClaw to send a reply back to the device for TTS playback. The `emoji` field is optional and can be used to control the device display.
 
 ```bash
 curl -X POST \
@@ -62,7 +54,3 @@ curl -X POST \
 - `poll` returns an empty payload if no messages are available.
 - `send` supports optional `emoji` to control the device display.
 
-## Ideas to try
-
-- Use long-poll (`waitSec`) to reduce CPU usage.
-- Map OpenClaw sessions to different devices by token/host.
