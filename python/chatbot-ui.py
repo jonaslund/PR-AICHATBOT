@@ -23,7 +23,7 @@ from rag_icon import RagStatusIcon
 scroll_thread = None
 scroll_stop_event = threading.Event()
 
-status_font_size=24
+status_font_size=20
 emoji_font_size=40
 battery_font_size=13
 
