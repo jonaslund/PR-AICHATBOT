@@ -41,7 +41,7 @@ const intervalCheckNetwork = () => {
   setInterval(async () => {
     const connected = await isNetworkConnected();
     display({
-      current_network_connected: connected,
+      network_connected: connected,
     });
   }, 10000);
 };
