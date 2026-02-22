@@ -108,7 +108,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         status: "listening",
         emoji: "😐",
         RGB: "#00ff00",
-        text: `Listening... (detect level:${level}%)`,
+        text: `(Detect level: ${level}%) Listening...`,
         rag_icon_visible: false,
       });
       recordAudio(ctx.currentRecordFilePath, ctx.wakeRecordMaxSec, level)
