@@ -3,22 +3,12 @@ import { isEmpty, noop, set } from "lodash";
 import dotenv from "dotenv";
 import { ttsServer, asrServer } from "../cloud-api/server";
 import { ASRServer, TTSResult, TTSServer } from "../type";
+import { getDynamicVoiceDetectLevel } from "./voice-detect";
 
 dotenv.config();
 
 const soundCardIndex = process.env.SOUND_CARD_INDEX || "1";
 const alsaOutputDevice = `hw:${soundCardIndex},0`;
-
-const voiceDetectLevel = process.env.VOICE_DETECT_LEVEL
-  ? parseInt(process.env.VOICE_DETECT_LEVEL, 10)
-  : 30;
-
-// const wakeupChimeVolumeRaw = process.env.WAKEUP_CHIME_VOLUME
-//   ? parseFloat(process.env.WAKEUP_CHIME_VOLUME)
-//   : 0.12;
-// const wakeupChimeVolume = Number.isFinite(wakeupChimeVolumeRaw)
-//   ? Math.min(Math.max(wakeupChimeVolumeRaw, 0), 1)
-//   : 0.12;
 
 const useWavPlayer = [TTSServer.gemini, TTSServer.piper].includes(ttsServer);
 
@@ -35,18 +25,6 @@ export const recordFileFormat = [
 function startPlayerProcess() {
   if (useWavPlayer) {
     return null;
-    // use sox play for wav files
-    // return spawn("play", [
-    //   "-f",
-    //   "S16_LE",
-    //   "-c",
-    //   "1",
-    //   "-r",
-    //   "24000",
-    //   "-D",
-    //   `hw:${soundCardIndex},0`,
-    //   "-", // read from stdin
-    // ]);
   } else {
     // use mpg123 for mp3 files
     return spawn("mpg123", [
@@ -132,10 +110,11 @@ export const playWakeupChime = (): Promise<void> => {
   });
 };
 
-const recordAudio = (
+const recordAudio = async (
   outputPath: string,
   duration: number = 10
 ): Promise<string> => {
+  const voiceDetectLevel = await getDynamicVoiceDetectLevel();
   return new Promise((resolve, reject) => {
     const args = [
       "-t",
