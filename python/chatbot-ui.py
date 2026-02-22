@@ -12,10 +12,18 @@ from whisplay import WhisplayBoard
 from camera import CameraThread
 from utils import ColorUtils, ImageUtils, TextUtils
 
+STATUS_ICON_DIR = os.path.join(os.path.dirname(__file__), "status-bar-icon")
+if STATUS_ICON_DIR not in sys.path:
+    sys.path.append(STATUS_ICON_DIR)
+
+from battery_icon import BatteryStatusIcon
+from network_icon import NetworkStatusIcon
+from rag_icon import RagStatusIcon
+
 scroll_thread = None
 scroll_stop_event = threading.Event()
 
-status_font_size=24
+status_font_size=20
 emoji_font_size=40
 battery_font_size=13
 
@@ -29,12 +37,19 @@ current_scroll_top = 0
 current_scroll_speed = 6
 current_image_path = ""
 current_image = None
+current_network_connected = None
+current_rag_icon_visible = False
 camera_mode = False
 camera_mode_button_press_time = 0
 camera_mode_button_release_time = 0
 camera_capture_image_path = ""
 camera_thread = None
 clients = {}
+status_icon_factories = []
+
+
+def register_status_icon_factory(factory, priority=100):
+    status_icon_factories.append({"priority": priority, "factory": factory})
 
 class RenderThread(threading.Thread):
     def __init__(self, whisplay, font_path, fps=30):
@@ -189,65 +204,51 @@ class RenderThread(threading.Thread):
         TextUtils.draw_mixed_text(draw, image, current_emoji, emoji_font, ((image_width - emoji_w) // 2, status_font_size + 8))
         
         # Draw battery icon
-        if battery_level is not None:
-            self.render_battery(draw, battery_font, battery_level, battery_color, image_width, status_font_size)
+        status_icon_context = {
+            "battery_level": battery_level,
+            "battery_color": battery_color,
+            "battery_font": battery_font,
+            "status_font_size": status_font_size,
+            "network_connected": current_network_connected,
+            "rag_icon_visible": current_rag_icon_visible,
+        }
+        status_icons = self.build_status_icons(status_icon_context)
+        self.render_status_icons(draw, status_icons, image_width)
         
         return top_height
 
-    def render_battery(self, draw, battery_font, battery_level, battery_color, image_width, status_font_size):
-         # Battery icon parameters (smaller)
-        battery_width = 26
-        battery_height = 15
-        battery_margin_right = 20
-        battery_x = image_width - battery_width - battery_margin_right
-        battery_y = (status_font_size) // 2
-        corner_radius = 3
-        fill_color = "black"
-        if battery_color is not None:
-            fill_color = battery_color # Light green
-        # Outline with rounded corners
-        outline_color = "white"
-        line_width = 2
+    def build_status_icons(self, context):
+        icons = []
+        battery_level = context.get("battery_level")
+        battery_color = context.get("battery_color")
+        battery_font = context.get("battery_font")
+        status_font_size = context.get("status_font_size")
 
-        # Draw rounded corners
-        draw.arc((battery_x, battery_y, battery_x + 2 * corner_radius, battery_y + 2 * corner_radius), 180, 270, fill=outline_color, width=line_width)  # Top-left
-        draw.arc((battery_x + battery_width - 2 * corner_radius, battery_y, battery_x + battery_width, battery_y + 2 * corner_radius), 270, 0, fill=outline_color, width=line_width)  # Top-right
-        draw.arc((battery_x, battery_y + battery_height - 2 * corner_radius, battery_x + 2 * corner_radius, battery_y + battery_height), 90, 180, fill=outline_color, width=line_width)  # Bottom-left
-        draw.arc((battery_x + battery_width - 2 * corner_radius, battery_y + battery_height - 2 * corner_radius, battery_x + battery_width, battery_y + battery_height), 0, 90, fill=outline_color, width=line_width)  # Bottom-right
+        if battery_level is not None:
+            icons.append(BatteryStatusIcon(battery_level, battery_color, battery_font, status_font_size))
+        if context.get("network_connected"):
+            icons.append(NetworkStatusIcon(status_font_size))
+        if context.get("rag_icon_visible"):
+            icons.append(RagStatusIcon(status_font_size))
 
-        # Draw top and bottom lines
-        draw.line([(battery_x + corner_radius, battery_y), (battery_x + battery_width - corner_radius, battery_y)], fill=outline_color, width=line_width)  # Top
-        draw.line([(battery_x + corner_radius, battery_y + battery_height), (battery_x + battery_width - corner_radius, battery_y + battery_height)], fill=outline_color, width=line_width)  # Bottom
+        for item in sorted(status_icon_factories, key=lambda entry: entry["priority"]):
+            icon_list = item["factory"](context)
+            if icon_list:
+                icons.extend(icon_list)
+        return icons
 
-        # Draw left and right lines
-        draw.line([(battery_x, battery_y + corner_radius), (battery_x, battery_y + battery_height - corner_radius)], fill=outline_color, width=line_width)  # Left
-        draw.line([(battery_x + battery_width, battery_y + corner_radius), (battery_x + battery_width, battery_y + battery_height - corner_radius)], fill=outline_color, width=line_width)  # Right
-
-        if fill_color !=(0,0,0):
-            draw.rectangle([battery_x + line_width // 2, battery_y + line_width // 2, battery_x + battery_width - line_width // 2, battery_y + battery_height - line_width // 2], fill=fill_color)
-
-        # Battery head
-        head_width = 2
-        head_height = 5
-        head_x = battery_x + battery_width
-        head_y = battery_y + (battery_height - head_height) // 2
-        draw.rectangle([head_x, head_y, head_x + head_width, head_y + head_height], fill="white")
-
-        # Battery level text (just number)
-        battery_text = str(battery_level)
-        text_bbox = battery_font.getbbox(battery_text)
-        text_h = text_bbox[3] - text_bbox[1]
-        text_y = battery_y + (battery_height - (battery_font.getmetrics()[0] + battery_font.getmetrics()[1])) // 2
-        text_w = text_bbox[2] - text_bbox[0]
-        text_x = battery_x + (battery_width - text_w) // 2
-        
-        luminance = ColorUtils.calculate_luminance(fill_color)
-        brightness_threshold = 128 # You can adjust this threshold as needed
-        if luminance > brightness_threshold:
-            text_fill_color = "black"
-        else:
-            text_fill_color = "white"
-        draw.text((text_x, text_y), battery_text, font=battery_font, fill=text_fill_color)
+    def render_status_icons(self, draw, icons, image_width):
+        if not icons:
+            return
+        right_margin = 10
+        icon_gap = 8
+        cursor_x = image_width - right_margin
+        for icon in icons:
+            icon_width, _ = icon.measure()
+            icon_x = cursor_x - icon_width
+            icon_y = icon.get_top_y()
+            icon.render(draw, icon_x, icon_y)
+            cursor_x = icon_x - icon_gap
 
     def run(self):
         frame_interval = 1 / self.fps
@@ -258,10 +259,12 @@ class RenderThread(threading.Thread):
     def stop(self):
         self.running = False
 
-def update_display_data(status=None, emoji=None, text=None, 
-                  scroll_speed=None, battery_level=None, battery_color=None, image_path=None):
+def update_display_data(status=None, emoji=None, text=None,
+                  scroll_speed=None, battery_level=None, battery_color=None, image_path=None,
+                  network_connected=None, rag_icon_visible=None):
     global current_status, current_emoji, current_text, current_battery_level
     global current_battery_color, current_scroll_top, current_scroll_speed, current_image_path
+    global current_network_connected, current_rag_icon_visible
 
     # If text is not continuation of previous, reset scroll position
     if text is not None and not text.startswith(current_text):
@@ -269,6 +272,10 @@ def update_display_data(status=None, emoji=None, text=None,
         TextUtils.clean_line_image_cache()
     if scroll_speed is not None:
         current_scroll_speed = scroll_speed
+    if network_connected is not None:
+        current_network_connected = network_connected
+    if rag_icon_visible is not None:
+        current_rag_icon_visible = rag_icon_visible
     current_status = status if status is not None else current_status
     current_emoji = emoji if emoji is not None else current_emoji
     current_text = text if text is not None else current_text
@@ -373,6 +380,8 @@ def handle_client(client_socket, addr, whisplay):
                     battery_level = content.get("battery_level", None)
                     battery_color = content.get("battery_color", None)
                     image_path = content.get("image", None)
+                    network_connected = content.get("network_connected", None)
+                    rag_icon_visible = content.get("rag_icon_visible", None)
                     capture_image_path = content.get("capture_image_path", None)
                     # boolean to enable camera mode
                     set_camera_mode = content.get("camera_mode", None)
@@ -404,14 +413,16 @@ def handle_client(client_socket, addr, whisplay):
                                 camera_thread.stop()
                                 camera_thread = None
                             camera_mode = False
-                        
+
                     if (text is not None) or (status is not None) or (emoji is not None) or \
                        (battery_level is not None) or (battery_color is not None) or \
-                       (image_path is not None):
+                              (image_path is not None) or (network_connected is not None) or \
+                              (rag_icon_visible is not None):
                         update_display_data(status=status, emoji=emoji,
                                      text=text, scroll_speed=scroll_speed,
                                      battery_level=battery_level, battery_color=battery_tuple,
-                                     image_path=image_path)
+                                                 image_path=image_path, network_connected=network_connected,
+                                                 rag_icon_visible=rag_icon_visible)
 
                     client_socket.send(b"OK\n")
                     if response_to_client:

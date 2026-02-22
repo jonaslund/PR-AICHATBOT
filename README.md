@@ -90,6 +90,28 @@ If you need to update the environment variables, you can edit the `.env` file di
 sudo systemctl restart chatbot.service
 ```
 
+## Wake Word (Optional)
+
+You can enable wake word detection for hands-free listening. When enabled, the device will listen for the wake word, start automatic recording with sentence-based stopping, and enter ASR after a detected utterance. If no speech is detected for 60 seconds, it returns to sleep. After the LLM finishes answering, it continues listening for the current session unless the user says an end keyword.
+
+Enable it by setting the following environment variables in `.env`:
+
+```bash
+WAKE_WORD_ENABLED=true
+WAKE_WORDS=hey_amy
+WAKE_WORD_IDLE_TIMEOUT_SEC=60
+WAKE_WORD_RECORD_MAX_SEC=60
+WAKE_WORD_END_KEYWORDS=byebye,goodbye,stop
+```
+
+Advanced options:
+
+```bash
+WAKE_WORD_MODEL_PATHS=/path/to/custom.tflite
+WAKE_WORD_THRESHOLD=0.5
+WAKE_WORD_COOLDOWN_SEC=1.5
+```
+
 ## Image Generation
 
 You can enable image generation by setting the `IMAGE_GENERATION_SERVER` variable in the `.env` file. Options include: OPENAI, GEMINI, VOLCENGINE.

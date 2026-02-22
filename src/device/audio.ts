@@ -1,12 +1,15 @@
-import { exec, spawn, ChildProcess } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import { isEmpty, noop, set } from "lodash";
 import dotenv from "dotenv";
 import { ttsServer, asrServer } from "../cloud-api/server";
 import { ASRServer, TTSResult, TTSServer } from "../type";
 
+export { getDynamicVoiceDetectLevel } from "./voice-detect";
+
 dotenv.config();
 
 const soundCardIndex = process.env.SOUND_CARD_INDEX || "1";
+const alsaOutputDevice = `hw:${soundCardIndex},0`;
 
 const useWavPlayer = [TTSServer.gemini, TTSServer.piper].includes(ttsServer);
 
@@ -23,18 +26,6 @@ export const recordFileFormat = [
 function startPlayerProcess() {
   if (useWavPlayer) {
     return null;
-    // use sox play for wav files
-    // return spawn("play", [
-    //   "-f",
-    //   "S16_LE",
-    //   "-c",
-    //   "1",
-    //   "-r",
-    //   "24000",
-    //   "-D",
-    //   `hw:${soundCardIndex},0`,
-    //   "-", // read from stdin
-    // ]);
   } else {
     // use mpg123 for mp3 files
     return spawn("mpg123", [
@@ -44,7 +35,7 @@ function startPlayerProcess() {
       "-o",
       "alsa",
       "-a",
-      `hw:${soundCardIndex},0`,
+      alsaOutputDevice,
     ]);
   }
 }
@@ -57,27 +48,118 @@ const killAllRecordingProcesses = (): void => {
     console.log("Killing recording process", child.pid);
     try {
       child.kill("SIGINT");
-    } catch (e) {}
+    } catch (e) { }
   });
   recordingProcessList.length = 0;
 };
 
-const recordAudio = (
+export const playWakeupChime = (): Promise<void> => {
+  return new Promise((resolve) => {
+    let finished = false;
+    const done = () => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      resolve();
+    };
+
+    //     play -n \
+    // synth 0.10 sine 720 vol 0.4 : \
+    // synth 0.12 sine 980 vol 0.35 : \
+    // synth 0.14 sine 1320 vol 0.3 \
+    // fade q 0.02 0.30 0.08 gain -30
+
+    const chimeProcess = spawn("sox", [
+      "-n",
+      "-t",
+      "alsa",
+      alsaOutputDevice,
+      "synth",
+      "0.10",
+      "sine",
+      "720",
+      "vol",
+      "0.4",
+      ":",
+      "synth",
+      "0.12",
+      "sine",
+      "980",
+      "vol",
+      "0.35",
+      ":",
+      "synth",
+      "0.14",
+      "sine",
+      "1320",
+      "vol",
+      "0.3",
+      "fade",
+      "q",
+      "0.02",
+      "0.30",
+      "0.08",
+      "gain",
+      "-30",
+    ]);
+
+    chimeProcess.on("error", done);
+    chimeProcess.on("exit", done);
+
+    setTimeout(done, 1500);
+  });
+};
+
+const recordAudio = async (
   outputPath: string,
-  duration: number = 10
+  duration: number = 10,
+  voiceDetectLevel: number = 30,
 ): Promise<string> => {
   return new Promise((resolve, reject) => {
-    const cmd = `sox -t alsa default -t ${recordFileFormat} -c 1 -r 16000 ${outputPath} silence 1 0.1 60% 1 1.0 60%`;
+    const args = [
+      "-t",
+      "alsa",
+      "default",
+      "-t",
+      recordFileFormat,
+      "-c",
+      "1",
+      "-r",
+      "16000",
+      outputPath,
+      "silence",
+      "1",
+      "0.1",
+      `${voiceDetectLevel}%`,
+      "1",
+      "0.7",
+      `${voiceDetectLevel}%`,
+    ];
     console.log(`Starting recording, maximum ${duration} seconds...`);
-    const recordingProcess = exec(cmd, (err, stdout, stderr) => {
-      currentRecordingReject = reject;
-      if (err) {
+    currentRecordingReject = reject;
+    const recordingProcess = spawn("sox", args);
+
+    recordingProcess.on("error", (err) => {
+      killAllRecordingProcesses();
+      reject(err);
+    });
+
+    recordingProcess.stdout?.on("data", (data) => {
+      console.log(data.toString());
+    });
+    recordingProcess.stderr?.on("data", (data) => {
+      console.error(data.toString());
+    });
+
+    recordingProcess.on("exit", (code) => {
+      if (code && code !== 0) {
         killAllRecordingProcesses();
-        reject(stderr);
-      } else {
-        resolve(outputPath);
-        killAllRecordingProcesses();
+        reject(code);
+        return;
       }
+      resolve(outputPath);
+      killAllRecordingProcesses();
     });
     recordingProcessList.push(recordingProcess);
 
@@ -137,7 +219,7 @@ const stopRecording = (): void => {
     killAllRecordingProcesses();
     try {
       currentRecordingReject();
-    } catch (e) {}
+    } catch (e) { }
     console.log("Recording stopped");
   } else {
     console.log("No recording process running");
@@ -175,7 +257,7 @@ const playAudioData = (params: TTSResult): Promise<void> => {
       new Promise<void>((resolve, reject) => {
         console.log("Playback duration:", audioDuration);
         player.isPlaying = true;
-        const process = spawn("play", [filePath]);
+        const process = spawn("sox", [filePath, "-t", "alsa", alsaOutputDevice]);
         process.on("close", (code: number) => {
           player.isPlaying = false;
           if (code !== 0) {
@@ -211,7 +293,7 @@ const playAudioData = (params: TTSResult): Promise<void> => {
 
     try {
       process.stdin?.write(audioBuffer);
-    } catch (e) {}
+    } catch (e) { }
     process.stdout?.on("data", (data) => console.log(data.toString()));
     process.stderr?.on("data", (data) => console.error(data.toString()));
     process.on("exit", (code) => {
@@ -236,7 +318,7 @@ const stopPlaying = (): void => {
         process.stdin?.end();
         process.kill();
       }
-    } catch {}
+    } catch { }
     player.isPlaying = false;
     // Recreate process
     setTimeout(() => {
@@ -254,7 +336,7 @@ process.on("SIGINT", () => {
       player.process.stdin?.end();
       player.process.kill();
     }
-  } catch {}
+  } catch { }
   process.exit();
 });
 

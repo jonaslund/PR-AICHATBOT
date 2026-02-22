@@ -31,6 +31,7 @@ export enum LLMServer {
   gemini = "gemini",
   grok = "grok",
   llm8850 = "llm8850",
+  whisplayim = "whisplay-im",
 }
 
 export enum TTSServer {
@@ -40,7 +41,9 @@ export enum TTSServer {
   gemini = "gemini",
   piper = "piper",
   piperhttp = "piper-http",
+  espeakng = "espeak-ng",
   llm8850melotts = "llm8850melotts",
+  supertonic = "supertonic",
 }
 
 export enum VectorDBServer {
@@ -63,6 +66,7 @@ export enum VisionServer {
   gemini = "gemini",
   volcengine = "volcengine",
 }
+
 
 export interface FunctionCall {
   function: {

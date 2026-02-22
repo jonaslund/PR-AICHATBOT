@@ -11,10 +11,12 @@ interface Status {
   brightness: number;
   RGB: string;
   battery_color: string;
-  battery_level: number;
+  battery_level: number | undefined;
   image: string;
   camera_mode: boolean;
   capture_image_path: string;
+  network_connected: boolean;
+  rag_icon_visible: boolean;
 }
 
 export class WhisplayDisplay {
@@ -26,10 +28,12 @@ export class WhisplayDisplay {
     brightness: 100,
     RGB: "#00FF30",
     battery_color: "#000000",
-    battery_level: 100, // 0-100
+    battery_level: undefined,
     image: "",
     camera_mode: false,
     capture_image_path: "",
+    network_connected: false,
+    rag_icon_visible: false,
   };
 
   private client = null as Socket | null;
@@ -57,10 +61,10 @@ export class WhisplayDisplay {
       // clean old click arrays >= 1500ms
       const now = Date.now();
       this.buttonPressTimeArray = this.buttonPressTimeArray.filter(
-        (time) => now - time <= 1000
+        (time) => now - time <= 1000,
       );
       this.buttonReleaseTimeArray = this.buttonReleaseTimeArray.filter(
-        (time) => now - time <= 1000
+        (time) => now - time <= 1000,
       );
       const doubleClickDetected =
         this.buttonPressTimeArray.length >= 2 &&
@@ -86,7 +90,7 @@ export class WhisplayDisplay {
   startPythonProcess(): void {
     const command = `cd ${resolve(
       __dirname,
-      "../../python"
+      "../../python",
     )} && python3 chatbot-ui.py`;
     console.log("Starting Python process...");
     this.pythonProcess = exec(command, (error, stdout, stderr) => {
@@ -98,10 +102,10 @@ export class WhisplayDisplay {
       console.error("Python process stderr:", stderr);
     });
     this.pythonProcess.stdout.on("data", (data: any) =>
-      console.log(data.toString())
+      console.log(data.toString()),
     );
     this.pythonProcess.stderr.on("data", (data: any) =>
-      console.error(data.toString())
+      console.error(data.toString()),
     );
   }
 
@@ -116,7 +120,7 @@ export class WhisplayDisplay {
 
   async connectWithRetry(
     retries: number = 10,
-    outerResolve: () => void
+    outerResolve: () => void,
   ): Promise<void> {
     await new Promise((resolve, reject) => {
       const attemptConnection = (attempt: number) => {
@@ -159,7 +163,7 @@ export class WhisplayDisplay {
         }
         console.log(
           `[${getCurrentTimeTag()}] Received data from Whisplay hat:`,
-          dataString
+          dataString,
         );
         try {
           const json = JSON.parse(dataString);
@@ -167,14 +171,14 @@ export class WhisplayDisplay {
             this.buttonPressTimeArray.push(Date.now());
             this.startMonitoringDoubleClick();
             if (!this.buttonDetectInterval) {
-              console.log('emit pressed')
+              console.log("emit pressed");
               this.buttonPressedCallback();
             }
           }
           if (json.event === "button_released") {
             this.buttonReleaseTimeArray.push(Date.now());
             if (!this.buttonDetectInterval) {
-              console.log('emit released')
+              console.log("emit released");
               this.buttonReleasedCallback();
             }
           }
@@ -182,7 +186,7 @@ export class WhisplayDisplay {
             this.onCameraCaptureCallback();
           }
         } catch {
-          console.error("Failed to parse JSON from data");
+          // console.error("Failed to parse JSON from data");
         }
       });
       this.client.on("error", (err: any) => {
@@ -236,13 +240,15 @@ export class WhisplayDisplay {
       battery_level,
       battery_color,
       image,
+      network_connected,
+      rag_icon_visible,
     } = {
       ...this.currentStatus,
       ...newStatus,
     };
 
     const changedValues = Object.entries(newStatus).filter(
-      ([key, value]) => (this.currentStatus as any)[key] !== value
+      ([key, value]) => (this.currentStatus as any)[key] !== value,
     );
 
     const isTextChanged = changedValues.some(([key]) => key === "text");
@@ -255,7 +261,9 @@ export class WhisplayDisplay {
     this.currentStatus.battery_level = battery_level;
     this.currentStatus.battery_color = battery_color;
     this.currentStatus.image = image;
-
+    this.currentStatus.network_connected = network_connected;
+    this.currentStatus.rag_icon_visible = rag_icon_visible;
+    
     const changedValuesObj = Object.fromEntries(changedValues);
     changedValuesObj.brightness = 100;
     const data = JSON.stringify(changedValuesObj);

@@ -7,6 +7,7 @@ import ollamaLLM from "./local/ollama-llm";
 import geminiLLM from "./gemini/gemini-llm";
 import grokLLM from "./grok/grok-llm";
 import llm8850LLM from "./local/llm8850-llm";
+import whisplayIMLLM from "./openclaw/openclaw-llm";
 import {
   ChatWithLLMStreamFunction,
   ResetChatHistoryFunction,
@@ -19,7 +20,7 @@ let chatWithLLMStream: ChatWithLLMStreamFunction = noop as any;
 let resetChatHistory: ResetChatHistoryFunction = noop as any;
 let summaryTextWithLLM: SummaryTextWithLLMFunction = async (text, _) => text;
 
-export const llmServer: LLMServer = (
+const llmServer: LLMServer = (
   process.env.LLM_SERVER || LLMServer.volcengine
 ).toLowerCase() as LLMServer;
 
@@ -45,11 +46,17 @@ switch (llmServer) {
   case LLMServer.llm8850:
     ({ chatWithLLMStream, resetChatHistory } = llm8850LLM);
     break;
+  case LLMServer.whisplayim:
+    ({ chatWithLLMStream, resetChatHistory, summaryTextWithLLM } =
+      whisplayIMLLM);
+    break;
   default:
     console.warn(
-      `unknown llm server: ${llmServer}, should be volcengine/openai/gemini/ollama/grok/llm8850`,
+      `unknown llm server: ${llmServer}, should be volcengine/openai/gemini/ollama/grok/llm8850/whisplay-im`,
     );
     break;
 }
 
-export { chatWithLLMStream, resetChatHistory, summaryTextWithLLM };
+const isImMode = llmServer === LLMServer.whisplayim;
+
+export { chatWithLLMStream, resetChatHistory, summaryTextWithLLM, isImMode };
