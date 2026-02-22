@@ -3,7 +3,8 @@ import { isEmpty, noop, set } from "lodash";
 import dotenv from "dotenv";
 import { ttsServer, asrServer } from "../cloud-api/server";
 import { ASRServer, TTSResult, TTSServer } from "../type";
-import { getDynamicVoiceDetectLevel } from "./voice-detect";
+
+export { getDynamicVoiceDetectLevel } from "./voice-detect";
 
 dotenv.config();
 
@@ -112,9 +113,9 @@ export const playWakeupChime = (): Promise<void> => {
 
 const recordAudio = async (
   outputPath: string,
-  duration: number = 10
+  duration: number = 10,
+  voiceDetectLevel: number = 30,
 ): Promise<string> => {
-  const voiceDetectLevel = await getDynamicVoiceDetectLevel();
   return new Promise((resolve, reject) => {
     const args = [
       "-t",

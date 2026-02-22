@@ -12,6 +12,7 @@ import {
   recordAudio,
   recordAudioManually,
   recordFileFormat,
+  getDynamicVoiceDetectLevel,
 } from "../../device/audio";
 import { chatWithLLMStream } from "../../cloud-api/server";
 import { isImMode } from "../../cloud-api/llm";
@@ -49,10 +50,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       rag_icon_visible: false,
       ...(getCurrentStatus().text === "Listening..."
         ? {
-            text: `Long Press the button to say something${
-              ctx.enableCamera ? ",\ndouble click to launch camera" : ""
+          text: `Long Press the button to say something${ctx.enableCamera ? ",\ndouble click to launch camera" : ""
             }.`,
-          }
+        }
         : {}),
     });
   },
@@ -61,9 +61,8 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     ctx.answerId += 1;
     ctx.wakeSessionActive = false;
     ctx.endAfterAnswer = false;
-    ctx.currentRecordFilePath = `${
-      ctx.recordingsDir
-    }/user-${Date.now()}.${recordFileFormat}`;
+    ctx.currentRecordFilePath = `${ctx.recordingsDir
+      }/user-${Date.now()}.${recordFileFormat}`;
     onButtonPressed(noop);
     const { result, stop } = recordAudioManually(ctx.currentRecordFilePath);
     onButtonReleased(() => {
@@ -91,28 +90,36 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
   wake_listening: (ctx: ChatFlowContext) => {
     ctx.isFromWakeListening = true;
     ctx.answerId += 1;
-    ctx.currentRecordFilePath = `${
-      ctx.recordingsDir
-    }/user-${Date.now()}.${recordFileFormat}`;
+    ctx.currentRecordFilePath = `${ctx.recordingsDir
+      }/user-${Date.now()}.${recordFileFormat}`;
     onButtonPressed(() => {
       ctx.transitionTo("listening");
     });
     onButtonReleased(noop);
-    recordAudio(ctx.currentRecordFilePath, ctx.wakeRecordMaxSec)
-      .then(() => {
-        ctx.transitionTo("asr");
-      })
-      .catch((err) => {
-        console.error("Error during auto recording:", err);
-        ctx.endWakeSession();
-        ctx.transitionTo("sleep");
-      });
     display({
-      status: "listening",
+      status: "detecting",
       emoji: "😐",
       RGB: "#00ff00",
-      text: "Listening...",
+      text: "Detecting voice level...",
       rag_icon_visible: false,
+    });
+    getDynamicVoiceDetectLevel().then((level) => {
+      display({
+        status: "listening",
+        emoji: "😐",
+        RGB: "#00ff00",
+        text: `Listening... (detect level:${level}%)`,
+        rag_icon_visible: false,
+      });
+      recordAudio(ctx.currentRecordFilePath, ctx.wakeRecordMaxSec, level)
+        .then(() => {
+          ctx.transitionTo("asr");
+        })
+        .catch((err) => {
+          console.error("Error during auto recording:", err);
+          ctx.endWakeSession();
+          ctx.transitionTo("sleep");
+        });
     });
   },
   asr: (ctx: ChatFlowContext) => {
@@ -168,11 +175,11 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         role: "system" | "user";
         content: string;
       }[] = [
-        {
-          role: "user",
-          content: ctx.asrText,
-        },
-      ];
+          {
+            role: "user",
+            content: ctx.asrText,
+          },
+        ];
       sendWhisplayIMMessage(prompt)
         .then((ok) => {
           if (ok) {
@@ -207,7 +214,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     ctx.partialThinking = "";
     ctx.thinkingSentences = [];
     [() => Promise.resolve().then(() => ""), getSystemPromptWithKnowledge]
-      [enableRAG ? 1 : 0](ctx.asrText)
+    [enableRAG ? 1 : 0](ctx.asrText)
       .then((res: string) => {
         let knowledgePrompt = res;
         if (res) {
@@ -231,9 +238,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         }[] = compact([
           knowledgePrompt
             ? {
-                role: "system",
-                content: knowledgePrompt,
-              }
+              role: "system",
+              content: knowledgePrompt,
+            }
             : null,
           {
             role: "user",
