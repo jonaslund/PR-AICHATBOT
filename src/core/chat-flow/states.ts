@@ -20,7 +20,7 @@ import { getSystemPromptWithKnowledge } from "../Knowledge";
 import { enableRAG } from "../../cloud-api/knowledge";
 import { cameraDir } from "../../utils/dir";
 import { getLatestDisplayImg, setLatestCapturedImg } from "../../utils/image";
-import { sendWhisplayIMMessage } from "../../cloud-api/openclaw/openclaw-llm";
+import { sendWhisplayIMMessage } from "../../cloud-api/whisplay-im/whisplay-im";
 import { ChatFlowContext, FlowName, FlowStateHandler } from "./types";
 
 export const flowStates: Record<FlowName, FlowStateHandler> = {

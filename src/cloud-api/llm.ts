@@ -7,7 +7,7 @@ import ollamaLLM from "./local/ollama-llm";
 import geminiLLM from "./gemini/gemini-llm";
 import grokLLM from "./grok/grok-llm";
 import llm8850LLM from "./local/llm8850-llm";
-import whisplayIMLLM from "./openclaw/openclaw-llm";
+import whisplayIMLLM from "./whisplay-im/whisplay-im";
 import {
   ChatWithLLMStreamFunction,
   ResetChatHistoryFunction,
