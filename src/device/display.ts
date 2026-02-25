@@ -1,7 +1,5 @@
-import { exec } from "child_process";
-import { resolve } from "path";
-import { Socket } from "net";
-import { getCurrentTimeTag } from "../utils";
+import fs from "fs";
+import path from "path";
 
 interface Status {
   status: string;
@@ -19,7 +17,26 @@ interface Status {
   rag_icon_visible: boolean;
 }
 
-export class WhisplayDisplay {
+type ButtonCallback = () => void;
+
+const parseBoolean = (value: string | undefined, defaultValue: boolean): boolean => {
+  if (value === undefined) return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return defaultValue;
+};
+
+const parseNumberList = (value: string | undefined, fallback: number[]): number[] => {
+  if (!value) return fallback;
+  const parsed = value
+    .split(",")
+    .map((item) => parseInt(item.trim(), 10))
+    .filter((item) => Number.isFinite(item));
+  return parsed.length > 0 ? parsed : fallback;
+};
+
+class HardwareDisplay {
   private currentStatus: Status = {
     status: "starting",
     emoji: "😊",
@@ -36,39 +53,107 @@ export class WhisplayDisplay {
     rag_icon_visible: false,
   };
 
-  private client = null as Socket | null;
-  private buttonPressedCallback: () => void = () => {};
-  private buttonReleasedCallback: () => void = () => {};
-  private buttonDoubleClickCallback: (() => void) | null = null;
-  private onCameraCaptureCallback: () => void = () => {};
-  private isReady: Promise<void>;
-  private pythonProcess: any; // Placeholder for Python process if needed
+  private buttonPressedCallback: ButtonCallback = () => {};
+  private buttonReleasedCallback: ButtonCallback = () => {};
+  private buttonDoubleClickCallback: ButtonCallback | null = null;
+  private onCameraCaptureCallback: ButtonCallback = () => {};
+
   private buttonPressTimeArray: number[] = [];
   private buttonReleaseTimeArray: number[] = [];
   private buttonDetectInterval: NodeJS.Timeout | null = null;
 
+  private readonly sourcesPressed = new Set<string>();
+
+  private gpioPollTimer: NodeJS.Timeout | null = null;
+  private gpioValuePath: string | null = null;
+  private lastGpioValue: string | null = null;
+
+  private gamepadScanTimer: NodeJS.Timeout | null = null;
+  private readonly gamepadStreams = new Map<string, fs.ReadStream>();
+  private readonly gamepadBufferMap = new Map<string, Buffer>();
+  private readonly gamepadRecordSize = process.arch.includes("64") ? 24 : 16;
+
+  private readonly gpioPin = parseInt(process.env.WAVESHARE_BUTTON_GPIO || process.env.BUTTON_GPIO || "17", 10);
+  private readonly gpioPollIntervalMs = parseInt(process.env.BUTTON_GPIO_POLL_INTERVAL_MS || "20", 10);
+  private readonly gpioActiveLow = parseBoolean(process.env.BUTTON_GPIO_ACTIVE_LOW, true);
+  private readonly gamepadEnabled = parseBoolean(process.env.GAMEPAD_LISTENER_ENABLED, true);
+  private readonly gamepadScanIntervalMs = parseInt(process.env.GAMEPAD_SCAN_INTERVAL_MS || "5000", 10);
+  private readonly gamepadButtonCodes = new Set(
+    parseNumberList(process.env.GAMEPAD_BUTTON_CODES, [304, 305, 307, 308]),
+  );
+
   constructor() {
-    this.startPythonProcess();
-    this.isReady = new Promise<void>((resolve) => {
-      this.connectWithRetry(15, resolve);
-    });
+    this.startGPIOListener();
+    this.startGamepadListener();
   }
 
-  startMonitoringDoubleClick(): void {
+  onButtonPressed(callback: ButtonCallback): void {
+    this.buttonPressedCallback = callback;
+  }
+
+  onButtonReleased(callback: ButtonCallback): void {
+    this.buttonReleasedCallback = callback;
+  }
+
+  onButtonDoubleClick(callback: ButtonCallback | null): void {
+    this.buttonDoubleClickCallback = callback;
+  }
+
+  onCameraCapture(callback: ButtonCallback): void {
+    this.onCameraCaptureCallback = callback;
+  }
+
+  getCurrentStatus(): Status {
+    return this.currentStatus;
+  }
+
+  async display(newStatus: Partial<Status> = {}): Promise<void> {
+    const prevStatus = this.currentStatus.status;
+    const prevText = this.currentStatus.text;
+    this.currentStatus = {
+      ...this.currentStatus,
+      ...newStatus,
+      brightness: 100,
+    };
+
+    if (newStatus.camera_mode) {
+      console.log("[Display] Camera mode requested but not supported without Whisplay display hardware.");
+    }
+
+    if (
+      newStatus.status &&
+      (newStatus.status !== prevStatus || (newStatus.text && newStatus.text !== prevText))
+    ) {
+      console.log(
+        `[Display] ${this.currentStatus.status}${this.currentStatus.text ? `: ${this.currentStatus.text}` : ""}`,
+      );
+    }
+  }
+
+  cleanup(): void {
+    if (this.gpioPollTimer) {
+      clearInterval(this.gpioPollTimer);
+      this.gpioPollTimer = null;
+    }
+    if (this.gamepadScanTimer) {
+      clearInterval(this.gamepadScanTimer);
+      this.gamepadScanTimer = null;
+    }
+    this.gamepadStreams.forEach((stream) => stream.destroy());
+    this.gamepadStreams.clear();
+    this.gamepadBufferMap.clear();
+  }
+
+  private startMonitoringDoubleClick(): void {
     if (this.buttonDetectInterval || !this.buttonDoubleClickCallback) return;
-    // check if there are two presses and two releases
+
     this.buttonDetectInterval = setTimeout(() => {
-      // clean old click arrays >= 1500ms
       const now = Date.now();
-      this.buttonPressTimeArray = this.buttonPressTimeArray.filter(
-        (time) => now - time <= 1000,
-      );
-      this.buttonReleaseTimeArray = this.buttonReleaseTimeArray.filter(
-        (time) => now - time <= 1000,
-      );
+      this.buttonPressTimeArray = this.buttonPressTimeArray.filter((time) => now - time <= 1000);
+      this.buttonReleaseTimeArray = this.buttonReleaseTimeArray.filter((time) => now - time <= 1000);
+
       const doubleClickDetected =
-        this.buttonPressTimeArray.length >= 2 &&
-        this.buttonReleaseTimeArray.length >= 2;
+        this.buttonPressTimeArray.length >= 2 && this.buttonReleaseTimeArray.length >= 2;
 
       if (doubleClickDetected) {
         this.buttonDoubleClickCallback?.();
@@ -80,239 +165,233 @@ export class WhisplayDisplay {
         }
       }
 
-      // reset arrays and interval
       this.buttonPressTimeArray = [];
       this.buttonReleaseTimeArray = [];
       this.buttonDetectInterval = null;
     }, 800);
   }
 
-  startPythonProcess(): void {
-    const command = `cd ${resolve(
-      __dirname,
-      "../../python",
-    )} && python3 chatbot-ui.py`;
-    console.log("Starting Python process...");
-    this.pythonProcess = exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error("Error starting Python process:", error);
-        return;
-      }
-      console.log("Python process stdout:", stdout);
-      console.error("Python process stderr:", stderr);
-    });
-    this.pythonProcess.stdout.on("data", (data: any) =>
-      console.log(data.toString()),
-    );
-    this.pythonProcess.stderr.on("data", (data: any) =>
-      console.error(data.toString()),
-    );
-  }
+  private handleButtonPressed(sourceId: string): void {
+    const wasPressed = this.sourcesPressed.size > 0;
+    this.sourcesPressed.add(sourceId);
+    if (wasPressed) {
+      return;
+    }
 
-  killPythonProcess(): void {
-    if (this.pythonProcess) {
-      console.log("Killing Python process...", this.pythonProcess.pid);
-      this.pythonProcess.kill();
-      process.kill(this.pythonProcess.pid, "SIGKILL");
-      this.pythonProcess = null;
+    this.buttonPressTimeArray.push(Date.now());
+    this.startMonitoringDoubleClick();
+    if (!this.buttonDetectInterval) {
+      this.buttonPressedCallback();
     }
   }
 
-  async connectWithRetry(
-    retries: number = 10,
-    outerResolve: () => void,
-  ): Promise<void> {
-    await new Promise((resolve, reject) => {
-      const attemptConnection = (attempt: number) => {
-        this.connect()
-          .then(() => {
-            resolve(true);
-          })
-          .catch((err) => {
-            if (attempt < retries) {
-              console.log(`Connection attempt ${attempt} failed, retrying...`);
-              setTimeout(() => attemptConnection(attempt + 1), 5000);
-            } else {
-              console.error("Failed to connect after multiple attempts:", err);
-              reject(err);
-            }
-          });
-      };
-      attemptConnection(1);
-    });
-    outerResolve();
+  private handleButtonReleased(sourceId: string): void {
+    const existed = this.sourcesPressed.delete(sourceId);
+    if (!existed || this.sourcesPressed.size > 0) {
+      return;
+    }
+
+    this.buttonReleaseTimeArray.push(Date.now());
+    if (!this.buttonDetectInterval) {
+      this.buttonReleasedCallback();
+    }
   }
 
-  async connect(): Promise<void> {
-    console.log("Connecting to local display socket...");
-    return new Promise<void>((resolve, reject) => {
-      // 销毁原来的this.client
-      if (this.client) {
-        this.client.destroy();
+  private startGPIOListener(): void {
+    if (!Number.isFinite(this.gpioPin)) {
+      console.warn("[GPIO] Invalid WAVESHARE_BUTTON_GPIO, GPIO button listener disabled.");
+      return;
+    }
+
+    const gpioDir = `/sys/class/gpio/gpio${this.gpioPin}`;
+    this.gpioValuePath = path.join(gpioDir, "value");
+
+    try {
+      if (!fs.existsSync(gpioDir)) {
+        fs.writeFileSync("/sys/class/gpio/export", `${this.gpioPin}`);
       }
-      this.client = new Socket();
-      this.client.connect(12345, "0.0.0.0", () => {
-        console.log("Connected to local display socket");
-        this.sendToDisplay(JSON.stringify(this.currentStatus));
-        resolve();
-      });
-      this.client.on("data", (data: Buffer) => {
-        const dataString = data.toString();
-        if (dataString.trim() === "OK") {
+      if (fs.existsSync(path.join(gpioDir, "direction"))) {
+        fs.writeFileSync(path.join(gpioDir, "direction"), "in");
+      }
+      if (fs.existsSync(path.join(gpioDir, "active_low"))) {
+        fs.writeFileSync(path.join(gpioDir, "active_low"), this.gpioActiveLow ? "1" : "0");
+      }
+      if (fs.existsSync(path.join(gpioDir, "edge"))) {
+        fs.writeFileSync(path.join(gpioDir, "edge"), "both");
+      }
+    } catch (error) {
+      console.warn("[GPIO] Failed to initialize GPIO input, listener disabled:", error);
+      this.gpioValuePath = null;
+      return;
+    }
+
+    try {
+      this.lastGpioValue = fs.readFileSync(this.gpioValuePath, "utf8").trim();
+    } catch {
+      this.lastGpioValue = null;
+    }
+
+    console.log(`[GPIO] Listening on BCM ${this.gpioPin} (active_low=${this.gpioActiveLow}).`);
+    this.gpioPollTimer = setInterval(() => {
+      if (!this.gpioValuePath) return;
+      try {
+        const raw = fs.readFileSync(this.gpioValuePath, "utf8").trim();
+        if (this.lastGpioValue === null) {
+          this.lastGpioValue = raw;
           return;
         }
-        console.log(
-          `[${getCurrentTimeTag()}] Received data from Whisplay hat:`,
-          dataString,
-        );
-        try {
-          const json = JSON.parse(dataString);
-          if (json.event === "button_pressed") {
-            this.buttonPressTimeArray.push(Date.now());
-            this.startMonitoringDoubleClick();
-            if (!this.buttonDetectInterval) {
-              console.log("emit pressed");
-              this.buttonPressedCallback();
-            }
-          }
-          if (json.event === "button_released") {
-            this.buttonReleaseTimeArray.push(Date.now());
-            if (!this.buttonDetectInterval) {
-              console.log("emit released");
-              this.buttonReleasedCallback();
-            }
-          }
-          if (json.event === "camera_capture") {
-            this.onCameraCaptureCallback();
-          }
-        } catch {
-          // console.error("Failed to parse JSON from data");
+        if (raw === this.lastGpioValue) {
+          return;
         }
-      });
-      this.client.on("error", (err: any) => {
-        console.error("Display Socket error:", err);
-        // 如果是ECONNREFUSED
-        if (err.code === "ECONNREFUSED") {
-          reject(err);
+        this.lastGpioValue = raw;
+
+        const isPressed = this.gpioActiveLow ? raw === "0" : raw === "1";
+        if (isPressed) {
+          this.handleButtonPressed(`gpio:${this.gpioPin}`);
+        } else {
+          this.handleButtonReleased(`gpio:${this.gpioPin}`);
         }
-      });
+      } catch {
+        // Keep polling even when temporary GPIO read errors occur.
+      }
+    }, this.gpioPollIntervalMs);
+  }
+
+  private startGamepadListener(): void {
+    if (!this.gamepadEnabled) {
+      console.log("[Gamepad] Listener disabled by GAMEPAD_LISTENER_ENABLED=false.");
+      return;
+    }
+
+    this.scanGamepadDevices();
+    this.gamepadScanTimer = setInterval(() => {
+      this.scanGamepadDevices();
+    }, this.gamepadScanIntervalMs);
+  }
+
+  private scanGamepadDevices(): void {
+    const inputDir = "/dev/input";
+    if (!fs.existsSync(inputDir)) {
+      return;
+    }
+
+    const eventDevices = fs
+      .readdirSync(inputDir)
+      .filter((file) => file.startsWith("event"))
+      .map((file) => path.join(inputDir, file));
+
+    eventDevices.forEach((eventPath) => {
+      if (this.gamepadStreams.has(eventPath)) {
+        return;
+      }
+
+      const eventName = path.basename(eventPath);
+      const deviceNamePath = `/sys/class/input/${eventName}/device/name`;
+      const deviceName = fs.existsSync(deviceNamePath)
+        ? fs.readFileSync(deviceNamePath, "utf8").trim().toLowerCase()
+        : "";
+
+      const looksLikeController =
+        deviceName.includes("gamepad") ||
+        deviceName.includes("joystick") ||
+        deviceName.includes("arcade") ||
+        deviceName.includes("controller");
+
+      if (!looksLikeController) {
+        return;
+      }
+
+      try {
+        const stream = fs.createReadStream(eventPath);
+        this.gamepadStreams.set(eventPath, stream);
+        this.gamepadBufferMap.set(eventPath, Buffer.alloc(0));
+        console.log(`[Gamepad] Listening on ${eventPath} (${deviceName || "unknown"}).`);
+
+        stream.on("data", (chunk: Buffer) => {
+          this.consumeGamepadEvents(eventPath, chunk);
+        });
+
+        stream.on("error", (error) => {
+          console.warn(`[Gamepad] Stream error on ${eventPath}:`, error);
+          this.detachGamepad(eventPath);
+        });
+
+        stream.on("close", () => {
+          this.detachGamepad(eventPath);
+        });
+      } catch (error) {
+        console.warn(`[Gamepad] Failed to open ${eventPath}:`, error);
+      }
     });
   }
 
-  onButtonPressed(callback: () => void): void {
-    this.buttonPressedCallback = callback;
-  }
+  private consumeGamepadEvents(eventPath: string, chunk: Buffer): void {
+    const previous = this.gamepadBufferMap.get(eventPath) || Buffer.alloc(0);
+    let buffer = Buffer.concat([previous, chunk]);
 
-  onButtonReleased(callback: () => void): void {
-    this.buttonReleasedCallback = callback;
-  }
+    while (buffer.length >= this.gamepadRecordSize) {
+      const eventBuffer = buffer.subarray(0, this.gamepadRecordSize);
+      buffer = buffer.subarray(this.gamepadRecordSize);
 
-  onButtonDoubleClick(callback: (() => void) | null): void {
-    this.buttonDoubleClickCallback = callback || null;
-  }
+      const eventOffset = this.gamepadRecordSize - 8;
+      const type = eventBuffer.readUInt16LE(eventOffset);
+      const code = eventBuffer.readUInt16LE(eventOffset + 2);
+      const value = eventBuffer.readInt32LE(eventOffset + 4);
 
-  onCameraCapture(callback: () => void): void {
-    this.onCameraCaptureCallback = callback;
-  }
+      if (type !== 1 || !this.gamepadButtonCodes.has(code)) {
+        continue;
+      }
 
-  private async sendToDisplay(data: string): Promise<void> {
-    await this.isReady;
-    try {
-      this.client?.write(`${data}\n`, "utf8", () => {
-        // console.log("send", data);
-      });
-    } catch (error) {
-      console.error("Failed to update display.");
+      const sourceId = `gamepad:${eventPath}:${code}`;
+      if (value === 1) {
+        this.handleButtonPressed(sourceId);
+      } else if (value === 0) {
+        this.handleButtonReleased(sourceId);
+      }
     }
+
+    this.gamepadBufferMap.set(eventPath, buffer);
   }
 
-  getCurrentStatus(): Status {
-    return this.currentStatus;
-  }
+  private detachGamepad(eventPath: string): void {
+    const stream = this.gamepadStreams.get(eventPath);
+    if (stream) {
+      stream.destroy();
+    }
+    this.gamepadStreams.delete(eventPath);
+    this.gamepadBufferMap.delete(eventPath);
 
-  async display(newStatus: Partial<Status> = {}): Promise<void> {
-    const {
-      status,
-      emoji,
-      text,
-      RGB,
-      brightness,
-      battery_level,
-      battery_color,
-      image,
-      network_connected,
-      rag_icon_visible,
-    } = {
-      ...this.currentStatus,
-      ...newStatus,
-    };
-
-    const changedValues = Object.entries(newStatus).filter(
-      ([key, value]) => (this.currentStatus as any)[key] !== value,
-    );
-
-    const isTextChanged = changedValues.some(([key]) => key === "text");
-
-    this.currentStatus.status = status;
-    this.currentStatus.emoji = emoji;
-    this.currentStatus.text = text;
-    this.currentStatus.RGB = RGB;
-    this.currentStatus.brightness = brightness;
-    this.currentStatus.battery_level = battery_level;
-    this.currentStatus.battery_color = battery_color;
-    this.currentStatus.image = image;
-    this.currentStatus.network_connected = network_connected;
-    this.currentStatus.rag_icon_visible = rag_icon_visible;
-    
-    const changedValuesObj = Object.fromEntries(changedValues);
-    changedValuesObj.brightness = 100;
-    const data = JSON.stringify(changedValuesObj);
-    if (isTextChanged) console.log("send data:", data);
-    this.sendToDisplay(data);
+    Array.from(this.sourcesPressed)
+      .filter((sourceId) => sourceId.includes(eventPath))
+      .forEach((sourceId) => this.handleButtonReleased(sourceId));
   }
 }
 
-// Create a singleton instance to maintain backward compatibility
-const displayInstance = new WhisplayDisplay();
+const displayInstance = new HardwareDisplay();
 
 export const display = displayInstance.display.bind(displayInstance);
-export const getCurrentStatus =
-  displayInstance.getCurrentStatus.bind(displayInstance);
-export const onButtonPressed =
-  displayInstance.onButtonPressed.bind(displayInstance);
-export const onButtonReleased =
-  displayInstance.onButtonReleased.bind(displayInstance);
-export const onButtonDoubleClick =
-  displayInstance.onButtonDoubleClick.bind(displayInstance);
-export const onCameraCapture =
-  displayInstance.onCameraCapture.bind(displayInstance);
+export const getCurrentStatus = displayInstance.getCurrentStatus.bind(displayInstance);
+export const onButtonPressed = displayInstance.onButtonPressed.bind(displayInstance);
+export const onButtonReleased = displayInstance.onButtonReleased.bind(displayInstance);
+export const onButtonDoubleClick = displayInstance.onButtonDoubleClick.bind(displayInstance);
+export const onCameraCapture = displayInstance.onCameraCapture.bind(displayInstance);
 
 function cleanup() {
-  console.log("Cleaning up display process before exit...");
-  displayInstance.killPythonProcess();
+  displayInstance.cleanup();
 }
 
-// kill the Python process on exit signals
 process.on("exit", cleanup);
 ["SIGINT", "SIGTERM"].forEach((signal) => {
   process.on(signal, () => {
-    console.log(`Received ${signal}, exiting...`);
     cleanup();
     process.exit(0);
   });
 });
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught Exception:", err);
+process.on("uncaughtException", () => {
   cleanup();
   process.exit(1);
 });
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+process.on("unhandledRejection", () => {
   cleanup();
   process.exit(1);
-});
-process.on("keyboardInterrupt", () => {
-  console.log("Keyboard Interrupt received, killing Python process...");
-  cleanup();
-  process.exit(0);
 });

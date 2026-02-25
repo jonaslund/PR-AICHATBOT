@@ -1,5 +1,7 @@
 import { spawn } from "child_process";
 
+const alsaInputDevice = process.env.ALSA_INPUT_DEVICE || "default";
+
 const envVoiceDetectLevel = process.env.VOICE_DETECT_LEVEL
   ? parseInt(process.env.VOICE_DETECT_LEVEL, 10)
   : 30;
@@ -56,7 +58,7 @@ const detectAmbientNoiseLevel = (): Promise<number | null> => {
     const soxArgs = [
       "-t",
       "alsa",
-      "default",
+      alsaInputDevice,
       "-n",
       "trim",
       "0",

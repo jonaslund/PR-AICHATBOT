@@ -18,20 +18,16 @@ command_exists() {
 
 # apt install sox libsox-fmt-mp3 mpg123
 sudo apt-get update
-sudo apt-get install -y sox mpg123 libsox-fmt-mp3 python3-dev libcairo2 libcairo2-dev
+sudo apt-get install -y sox mpg123 libsox-fmt-mp3 python3-dev
 
 # enable spi
+# kept for compatibility with camera/other SPI peripherals
 sudo raspi-config nonint do_spi 0
 
 # install python dependencies
 echo "Installing Python dependencies..."
 cd python
 pip install -r requirements.txt --break-system-packages
-# download fonts and emojis
-wget -O NotoSansSC-Bold.ttf https://cdn.pisugar.com/EchoView/NotoSansSC-Bold.ttf
-wget -O emoji_svg.zip https://cdn.pisugar.com/EchoView/emoji_svg.zip
-# overwrite if exists
-unzip -o emoji_svg.zip
 cd ..
 
 

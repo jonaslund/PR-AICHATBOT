@@ -22,7 +22,9 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-source ~/.bashrc
+if [ -f "$HOME/.bashrc" ]; then
+  source "$HOME/.bashrc"
+fi
 
 if [ "$use_npm" = true ]; then
   echo "Using npm to build the project."

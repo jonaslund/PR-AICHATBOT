@@ -1,180 +1,94 @@
-# Whisplay-AI-Chatbot
+# PR-AICHATBOT (LLM8850 + Waveshare + wm8960)
 
-<img src="https://docs.pisugar.com/img/whisplay_logo@4x-8.png" alt="Whisplay AI Chatbot" width="200" />
+This fork runs a local voice chatbot on Raspberry Pi with:
+- `LLM8850` for local LLM/ASR/TTS services
+- `wm8960` audio HAT for speaker + microphone
+- `Waveshare` GPIO button as push-to-talk
+- Optional USB arcade/gamepad button input
 
-This is a pocket-sized AI chatbot device built using a Raspberry Pi Zero 2w. Just press the button, speak, and it talks back—like a futuristic walkie-talkie with a mind of its own.
+The Whisplay LCD/button stack is removed from runtime in this fork.
 
-Test Video Playlist:
-[https://www.youtube.com/watch?v=lOVA0Gui-4Q](https://www.youtube.com/playlist?list=PLpTS9YM-tG_mW5H7Xs2EO0qvlAI-Jm1e_)
+## Hardware Assumptions
 
-Tutorial:
-[https://www.youtube.com/watch?v=Nwu2DruSuyI](https://www.youtube.com/watch?v=Nwu2DruSuyI)
+- Raspberry Pi (recommended Pi 5)
+- LLM8850 AI accelerator
+- wm8960 audio HAT
+- Waveshare dual HAT button wired to GPIO (default BCM `17`, physical pin `11`)
 
-Tutorial (offline version build on RPi 5):
+## Install
 
-[https://youtu.be/kFmhSTh167U](https://youtu.be/kFmhSTh167U)
+```bash
+git clone <your-fork-url>
+cd PR-AICHATBOT
+bash install_dependencies.sh
+source ~/.bashrc
+cp .env.template .env
+```
 
-[https://youtu.be/QNbHdJUW6z8](https://youtu.be/QNbHdJUW6z8)
+## Required `.env` (offline/local example)
 
-[https://youtu.be/xGzvFzdBAwc](https://youtu.be/xGzvFzdBAwc)
+```bash
+ASR_SERVER=llm8850whisper
+LLM_SERVER=llm8850
+TTS_SERVER=llm8850melotts
 
+LLM8850_LLM_HOST=http://localhost:8000
+LLM8850_WHISPER_HOST=http://localhost:8801
+LLM8850_MELOTTS_HOST=http://localhost:8802
 
-## Hardware
+# Audio routing (override when needed)
+# ALSA_OUTPUT_DEVICE=hw:1,0
+# ALSA_INPUT_DEVICE=default
 
-- Raspberry Pi zero 2w (Recommand RRi 5, 8G RAM for offline build)
-- PiSugar Whisplay HAT (including LCD screen, on-board speaker and microphone)
-- PiSugar 3 1200mAh
+# Waveshare GPIO button input
+# WAVESHARE_BUTTON_GPIO=17
+# BUTTON_GPIO_ACTIVE_LOW=true
 
-## Pre-build Image
+# Optional USB gamepad/arcade button listener
+# GAMEPAD_LISTENER_ENABLED=true
+# GAMEPAD_BUTTON_CODES=304,305,307,308
+```
 
-- Please find the pre-build images in project wiki: https://github.com/PiSugar/whisplay-ai-chatbot/wiki
-
-## Drivers
-
-You need to firstly install the audio drivers for the Whisplay HAT. Follow the instructions in the [Whisplay HAT repository](https://github.com/PiSugar/whisplay).
-
-## Installation Steps
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/PiSugar/whisplay-ai-chatbot.git
-   cd whisplay-ai-chatbot
-   ```
-2. Install dependencies:
-   ```bash
-   bash install_dependencies.sh
-   source ~/.bashrc
-   ```
-   Running `source ~/.bashrc` is necessary to load the new environment variables.
-3. Create a `.env` file based on the `.env.template` file and fill in the necessary environment variables.
-4. Build the project:
-   ```bash
-   bash build.sh
-   ```
-5. Start the chatbot service:
-   ```bash
-   bash run_chatbot.sh
-   ```
-6. Optionally, set up the chatbot service to start on boot:
-   ```bash
-   sudo bash startup.sh
-   ```
-   Please note that this will disable the graphical interface and set the system to multi-user mode, which is suitable for headless operation.
-   You can find the output logs at `chatbot.log`. Running `tail -f chatbot.log` will also display the logs in real-time.
-
-## Build After Code Changes
-
-If you make changes to the node code or just pull the new code from this repository, you need to rebuild the project. You can do this by running:
+## Build and Run
 
 ```bash
 bash build.sh
+bash run_chatbot.sh
 ```
 
-If If you encounter `ModuleNotFoundError` or there's new third-party libraries to the python code, please run the following command to update the dependencies for python:
-```
-cd python
-pip install -r requirements.txt --break-system-packages
-```
-
-The env template may be updated from time to time. If you want to upgrade your existing `.env` file based on the latest `.env.template`, you can run the following command:
+## Run as service
 
 ```bash
-bash upgrade-env.sh
+sudo bash startup.sh
 ```
 
-## Update Environment Variables
+## Cleanup old pre-fork install
 
-If you need to update the environment variables, you can edit the `.env` file directly. After making changes, please restart the chatbot service with:
+If your Pi previously ran the Whisplay-based install:
 
 ```bash
-sudo systemctl restart chatbot.service
+bash cleanup_legacy_install.sh
 ```
 
-## Wake Word (Optional)
-
-You can enable wake word detection for hands-free listening. When enabled, the device will listen for the wake word, start automatic recording with sentence-based stopping, and enter ASR after a detected utterance. If no speech is detected for 60 seconds, it returns to sleep. After the LLM finishes answering, it continues listening for the current session unless the user says an end keyword.
-
-Enable it by setting the following environment variables in `.env`:
+Optional: pass legacy repo path if it was not `~/whisplay-ai-chatbot`:
 
 ```bash
-WAKE_WORD_ENABLED=true
-WAKE_WORDS=hey_amy
-WAKE_WORD_IDLE_TIMEOUT_SEC=60
-WAKE_WORD_RECORD_MAX_SEC=60
-WAKE_WORD_END_KEYWORDS=byebye,goodbye,stop
+bash cleanup_legacy_install.sh /path/to/old/repo
 ```
 
-Advanced options:
+Then recreate the service from this fork:
 
 ```bash
-WAKE_WORD_MODEL_PATHS=/path/to/custom.tflite
-WAKE_WORD_THRESHOLD=0.5
-WAKE_WORD_COOLDOWN_SEC=1.5
+sudo bash startup.sh
 ```
 
-## Image Generation
+## Controls
 
-You can enable image generation by setting the `IMAGE_GENERATION_SERVER` variable in the `.env` file. Options include: OPENAI, GEMINI, VOLCENGINE.
+- Press and hold mapped button (GPIO or gamepad code) to record.
+- Release to stop recording and trigger ASR.
+- Wake word mode still works if enabled in `.env`.
 
-Then you can use prompts like "A children's book drawing of a veterinarian using a stethoscope to listen to the heartbeat of a baby otter." to generate images.
+## Notes
 
-The generated images will be displayed on the screen and saved in the `data/images` folder.
-
-## Display Battery Level
-
-The battery level display depends on the pisugar-power-manager. If you are using PiSugar2 or PiSugar3, you need to install the pisugar-power-manager first. You can find the installation instructions in the [PiSugar Power Manager repository](https://github.com/PiSugar/pisugar-power-manager-rs).
-
-Or use the following command to install it:
-
-```bash
-wget https://cdn.pisugar.com/release/pisugar-power-manager.sh
-bash pisugar-power-manager.sh -c release
-```
-
-## Data Folder
-
-The chatbot saves conversation history and generated images in the `data` folder. It's a temporal folder and can be deleted if you want to clear the history.
-
-## Enclosure
-
-[Whisplay Chatbot Case for Pi02](https://github.com/PiSugar/suit-cases/tree/main/pisugar3-whisplay-chatbot)
-
-[Whisplay Chatbot Case (FDM) for Pi02](https://github.com/PiSugar/suit-cases/tree/main/pisugar3-whisplay-chatbot-fdm)
-
-[Whisplay Chatbot Case (FDM) for Pi5](https://github.com/PiSugar/suit-cases/tree/main/pi5-whisplay-chatbot)
-
-[Whisplay Chatbot Case (FDM) for Pi5 & LLM8850](https://github.com/PiSugar/suit-cases/tree/main/pi5-whisplay-chatbot-llm8850)
-
-## LLM8850 Support
-
-If you have a LLM8850 AI Accelerator, you can set up the LLM8850 services for local ASR, TTS, and LLM API to enable offline capabilities.
-
-Please refer to the [LLM8850 Integration Guide](https://github.com/PiSugar/whisplay-ai-chatbot/wiki/LLM8850-Integration) for detailed setup instructions.
-
-## Goals
-
-- Integrate the tool with the API ✅
-- Enable the AI assistant to adjust the volume autonomously ✅
-- Reset the conversation history if there is no speech for five minutes ✅
-- Support local llm server ✅
-- Support local asr (whisper/vosk) ✅
-- Support local tts (piper) ✅
-- Support image generation (openai/gemini/volcengine) ✅
-- Refactor python render thread, better performance ✅
-- Add Google Gemini API support ✅
-- Add Grok API support ✅
-- RPI camera support ✅
-- Support LLM8850 whisper ✅
-- Support LLM8850 melottsTTS ✅
-- Support LLM8850 Qwen3 llm api (not support tool) ✅
-- Support LLM8850 FastVLM
-- Support LLM8850 image generation
-- Support speaker recognition
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=PiSugar/whisplay-ai-chatbot&type=date&legend=bottom-right)](https://www.star-history.com/#PiSugar/whisplay-ai-chatbot&type=date&legend=bottom-right)
-
-## License
-
-[GPL-3.0](https://github.com/PiSugar/whisplay-ai-chatbot?tab=GPL-3.0-1-ov-file#readme)
+- Battery display from PiSugar manager is optional; if unavailable it fails gracefully.
+- Camera-on-display mode from Whisplay is not supported in this fork.

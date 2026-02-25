@@ -9,7 +9,8 @@ export { getDynamicVoiceDetectLevel } from "./voice-detect";
 dotenv.config();
 
 const soundCardIndex = process.env.SOUND_CARD_INDEX || "1";
-const alsaOutputDevice = `hw:${soundCardIndex},0`;
+const alsaOutputDevice = process.env.ALSA_OUTPUT_DEVICE || `hw:${soundCardIndex},0`;
+const alsaInputDevice = process.env.ALSA_INPUT_DEVICE || "default";
 
 const useWavPlayer = [TTSServer.gemini, TTSServer.piper].includes(ttsServer);
 
@@ -120,7 +121,7 @@ const recordAudio = async (
     const args = [
       "-t",
       "alsa",
-      "default",
+      alsaInputDevice,
       "-t",
       recordFileFormat,
       "-c",
@@ -182,7 +183,7 @@ const recordAudioManually = (
     const recordingProcess = spawn("sox", [
       "-t",
       "alsa",
-      "default",
+      alsaInputDevice,
       "-t",
       recordFileFormat,
       "-c",

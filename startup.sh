@@ -19,6 +19,7 @@ fi
 TARGET_USER=$(whoami)
 USER_HOME=$HOME
 TARGET_UID=$(id -u $TARGET_USER)
+REPO_DIR=$(cd "$(dirname "$0")" && pwd)
 
 # Make sure we do not return roon (in case user called the script with sudo)
 if [ "$TARGET_USER" == "root" ]; then
@@ -56,11 +57,11 @@ Wants=sound.target
 Type=simple
 User=$TARGET_USER
 Group=audio
-SupplementaryGroups=audio video gpio
+SupplementaryGroups=audio video gpio input
 
 # Use the dynamic Home Directory
-WorkingDirectory=$USER_HOME/whisplay-ai-chatbot
-ExecStart=/bin/bash $USER_HOME/whisplay-ai-chatbot/run_chatbot.sh
+WorkingDirectory=$REPO_DIR
+ExecStart=/bin/bash $REPO_DIR/run_chatbot.sh
 
 # Inject the dynamic Node path and dynamic User ID
 Environment=PATH=$NODE_FOLDER:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
@@ -72,8 +73,8 @@ Environment=NODE_ENV=production
 PrivateDevices=no
 
 # Logs
-StandardOutput=append:$USER_HOME/whisplay-ai-chatbot/chatbot.log
-StandardError=append:$USER_HOME/whisplay-ai-chatbot/chatbot.log
+StandardOutput=append:$REPO_DIR/chatbot.log
+StandardError=append:$REPO_DIR/chatbot.log
 
 Restart=always
 RestartSec=2

@@ -21,6 +21,7 @@ def main():
     model_paths = parse_list(os.getenv("WAKE_WORD_MODEL_PATHS", ""))
     threshold = float(os.getenv("WAKE_WORD_THRESHOLD", "0.5"))
     cooldown_sec = float(os.getenv("WAKE_WORD_COOLDOWN_SEC", "1.5"))
+    alsa_input_device = os.getenv("ALSA_INPUT_DEVICE", "default")
 
     if not wake_words and not model_paths:
         wake_words = ["hey_jarvis"]
@@ -37,7 +38,7 @@ def main():
         "sox",
         "-t",
         "alsa",
-        "default",
+        alsa_input_device,
         "-r",
         "16000",
         "-b",

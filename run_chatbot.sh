@@ -4,8 +4,8 @@ export NVM_DIR="/home/pi/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 
-# Find the sound card index for wm8960soundcard
-card_index=$(awk '/wm8960soundcard/ {print $1}' /proc/asound/cards | head -n1)
+# Find the sound card index for wm8960 sound card
+card_index=$(awk '/wm8960/ {print $1}' /proc/asound/cards | head -n1)
 # Default to 1 if not found
 if [ -z "$card_index" ]; then
   card_index=1
@@ -40,6 +40,8 @@ get_env_value() {
 # check if .env file exists
 initial_volume_level=114
 serve_ollama=false
+alsa_output_device="hw:$card_index,0"
+alsa_input_device="default"
 if [ -f ".env" ]; then
   # Load only SERVE_OLLAMA from .env (ignore comments/other vars)
   SERVE_OLLAMA=$(get_env_value "SERVE_OLLAMA")
@@ -57,6 +59,12 @@ if [ -f ".env" ]; then
   FASTER_WHISPER_MODEL_SIZE=$(get_env_value "FASTER_WHISPER_MODEL_SIZE")
   [ -n "$FASTER_WHISPER_MODEL_SIZE" ] && export FASTER_WHISPER_MODEL_SIZE
 
+  ALSA_OUTPUT_DEVICE=$(get_env_value "ALSA_OUTPUT_DEVICE")
+  [ -n "$ALSA_OUTPUT_DEVICE" ] && alsa_output_device=$ALSA_OUTPUT_DEVICE
+
+  ALSA_INPUT_DEVICE=$(get_env_value "ALSA_INPUT_DEVICE")
+  [ -n "$ALSA_INPUT_DEVICE" ] && alsa_input_device=$ALSA_INPUT_DEVICE
+
   echo ".env variables loaded."
 
   # check if SERVE_OLLAMA is set to true
@@ -71,6 +79,11 @@ else
   echo ".env file not found, please create one based on .env.template."
   exit 1
 fi
+
+export ALSA_OUTPUT_DEVICE=$alsa_output_device
+export ALSA_INPUT_DEVICE=$alsa_input_device
+echo "ALSA_OUTPUT_DEVICE=$ALSA_OUTPUT_DEVICE"
+echo "ALSA_INPUT_DEVICE=$ALSA_INPUT_DEVICE"
 
 # Adjust initial volume
 amixer -c $card_index set Speaker $initial_volume_level
