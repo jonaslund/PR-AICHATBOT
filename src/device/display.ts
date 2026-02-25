@@ -263,7 +263,7 @@ class HardwareDisplay {
     this.gpioPollTimer = setInterval(() => {
       try {
         const raw = this.gpioUseGpiogetFallback
-          ? execFileSync("gpioget", [this.gpioChip, `${this.gpioLine}`], { encoding: "utf8" }).trim()
+          ? execFileSync("gpioget", ["-c", this.gpioChip, `${this.gpioLine}`], { encoding: "utf8" }).trim()
           : fs.readFileSync(this.gpioValuePath!, "utf8").trim();
         if (this.lastGpioValue === null) {
           this.lastGpioValue = raw;
