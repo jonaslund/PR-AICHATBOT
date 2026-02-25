@@ -317,8 +317,9 @@ class HardwareDisplay {
         this.gamepadBufferMap.set(eventPath, Buffer.alloc(0));
         console.log(`[Gamepad] Listening on ${eventPath} (${deviceName || "unknown"}).`);
 
-        stream.on("data", (chunk: Buffer) => {
-          this.consumeGamepadEvents(eventPath, chunk);
+        stream.on("data", (chunk: string | Buffer) => {
+          const chunkBuffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          this.consumeGamepadEvents(eventPath, chunkBuffer);
         });
 
         stream.on("error", (error) => {

@@ -29,10 +29,10 @@ resp=$(curl -fsS -X POST "$TTS_HOST/synthesize" \
   -H "Content-Type: application/json" \
   -d "$json_payload")
 
-python3 -c '
+printf '%s' "$resp" | python3 -c '
 import json,base64,sys
-resp = json.loads(sys.argv[1])
-out = sys.argv[2]
+resp = json.loads(sys.stdin.read())
+out = sys.argv[1]
 if not resp.get("success"):
     raise SystemExit(f"TTS failed: {resp}")
 b64 = resp.get("base64")
@@ -41,7 +41,7 @@ if not b64:
 with open(out, "wb") as f:
     f.write(base64.b64decode(b64))
 print(out)
-' "$resp" "$OUT_FILE"
+' "$OUT_FILE"
 
 echo "[TTS] Playing: $OUT_FILE"
 aplay -D "$OUT_DEVICE" "$OUT_FILE"
