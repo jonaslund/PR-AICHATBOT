@@ -37,6 +37,13 @@ const parseNumberList = (value: string | undefined, fallback: number[]): number[
   return parsed.length > 0 ? parsed : fallback;
 };
 
+const parseGpioState = (raw: string): boolean | null => {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "1" || normalized === "active") return true;
+  if (normalized === "0" || normalized === "inactive") return false;
+  return null;
+};
+
 class HardwareDisplay {
   private currentStatus: Status = {
     status: "starting",
@@ -274,7 +281,11 @@ class HardwareDisplay {
         }
         this.lastGpioValue = raw;
 
-        const isPressed = this.gpioActiveLow ? raw === "0" : raw === "1";
+        const state = parseGpioState(raw);
+        if (state === null) {
+          return;
+        }
+        const isPressed = this.gpioActiveLow ? !state : state;
         if (isPressed) {
           this.handleButtonPressed(`gpio:${this.gpioPin}`);
         } else {
