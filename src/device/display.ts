@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { execFileSync } from "child_process";
 
 interface Status {
   status: string;
@@ -67,6 +68,7 @@ class HardwareDisplay {
   private gpioPollTimer: NodeJS.Timeout | null = null;
   private gpioValuePath: string | null = null;
   private lastGpioValue: string | null = null;
+  private gpioUseGpiogetFallback: boolean = false;
 
   private gamepadScanTimer: NodeJS.Timeout | null = null;
   private readonly gamepadStreams = new Map<string, fs.ReadStream>();
@@ -74,6 +76,11 @@ class HardwareDisplay {
   private readonly gamepadRecordSize = process.arch.includes("64") ? 24 : 16;
 
   private readonly gpioPin = parseInt(process.env.WAVESHARE_BUTTON_GPIO || process.env.BUTTON_GPIO || "17", 10);
+  private readonly gpioChip = process.env.WAVESHARE_BUTTON_GPIOCHIP || "gpiochip0";
+  private readonly gpioLine = parseInt(
+    process.env.WAVESHARE_BUTTON_LINE || process.env.WAVESHARE_BUTTON_GPIO || process.env.BUTTON_GPIO || "17",
+    10,
+  );
   private readonly gpioPollIntervalMs = parseInt(process.env.BUTTON_GPIO_POLL_INTERVAL_MS || "20", 10);
   private readonly gpioActiveLow = parseBoolean(process.env.BUTTON_GPIO_ACTIVE_LOW, true);
   private readonly gamepadEnabled = parseBoolean(process.env.GAMEPAD_LISTENER_ENABLED, true);
@@ -212,7 +219,7 @@ class HardwareDisplay {
           fs.writeFileSync("/sys/class/gpio/export", `${this.gpioPin}`);
         } catch (error: any) {
           if (error?.code !== "EBUSY") {
-            throw error;
+            throw new Error(`sysfs GPIO export failed (${error?.message || error})`);
           }
         }
       }
@@ -230,22 +237,34 @@ class HardwareDisplay {
       writeIfExists(path.join(gpioDir, "active_low"), this.gpioActiveLow ? "1" : "0");
       writeIfExists(path.join(gpioDir, "edge"), "both");
     } catch (error) {
-      console.warn("[GPIO] Failed to initialize GPIO input, listener disabled:", error);
+      console.warn("[GPIO] sysfs init failed, trying gpioget fallback:", error);
+      if (!Number.isFinite(this.gpioLine)) {
+        console.warn("[GPIO] Invalid WAVESHARE_BUTTON_LINE, GPIO listener disabled.");
+        this.gpioValuePath = null;
+        return;
+      }
+      this.gpioUseGpiogetFallback = true;
       this.gpioValuePath = null;
-      return;
     }
 
-    try {
-      this.lastGpioValue = fs.readFileSync(this.gpioValuePath, "utf8").trim();
-    } catch {
-      this.lastGpioValue = null;
-    }
-
-    console.log(`[GPIO] Listening on BCM ${this.gpioPin} (active_low=${this.gpioActiveLow}).`);
-    this.gpioPollTimer = setInterval(() => {
-      if (!this.gpioValuePath) return;
+    if (!this.gpioUseGpiogetFallback) {
       try {
-        const raw = fs.readFileSync(this.gpioValuePath, "utf8").trim();
+        this.lastGpioValue = fs.readFileSync(this.gpioValuePath!, "utf8").trim();
+      } catch {
+        this.lastGpioValue = null;
+      }
+      console.log(`[GPIO] Listening on BCM ${this.gpioPin} (active_low=${this.gpioActiveLow}).`);
+    } else {
+      console.log(
+        `[GPIO] Listening via gpioget on ${this.gpioChip} line ${this.gpioLine} (active_low=${this.gpioActiveLow}).`,
+      );
+    }
+
+    this.gpioPollTimer = setInterval(() => {
+      try {
+        const raw = this.gpioUseGpiogetFallback
+          ? execFileSync("gpioget", [this.gpioChip, `${this.gpioLine}`], { encoding: "utf8" }).trim()
+          : fs.readFileSync(this.gpioValuePath!, "utf8").trim();
         if (this.lastGpioValue === null) {
           this.lastGpioValue = raw;
           return;
