@@ -21,7 +21,7 @@ USER_HOME=$HOME
 TARGET_UID=$(id -u $TARGET_USER)
 REPO_DIR=$(cd "$(dirname "$0")" && pwd)
 
-# Make sure we do not return roon (in case user called the script with sudo)
+# Make sure script is not run as root directly
 if [ "$TARGET_USER" == "root" ]; then
     echo "Error: Please run this script as your normal user (WITHOUT sudo)."
     echo "The script will ask for sudo permissions only when writing the service file."
@@ -34,7 +34,7 @@ echo "Detected Home: $USER_HOME"
 echo "Detected UID:  $TARGET_UID"
 
 # Find Node bin
-NODE_BIN=$(which node)
+NODE_BIN=$(command -v node)
 
 if [ -z "$NODE_BIN" ]; then
     echo "Error: Could not find 'node'. Make sure you can run 'node -v' in this terminal."
@@ -44,6 +44,11 @@ fi
 NODE_FOLDER=$(dirname $NODE_BIN)
 echo "Found Node at: $NODE_FOLDER"
 echo "----------------------------------------"
+
+if [ ! -f "$REPO_DIR/run_chatbot.sh" ]; then
+    echo "Error: run_chatbot.sh not found in $REPO_DIR"
+    exit 1
+fi
 
 # Create the service file
 echo "Creating systemd service file..."
@@ -92,4 +97,4 @@ sudo systemctl restart chatbot.service
 echo "Done! Chatbot is starting..."
 echo "Checking status..."
 sleep 2
-sudo systemctl status chatbot --no-pager
+sudo systemctl status chatbot.service --no-pager
