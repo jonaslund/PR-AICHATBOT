@@ -191,6 +191,7 @@ class HardwareDisplay {
     if (wasPressed) {
       return;
     }
+    console.log(`[Button] pressed (${sourceId})`);
 
     this.buttonPressTimeArray.push(Date.now());
     this.startMonitoringDoubleClick();
@@ -204,6 +205,7 @@ class HardwareDisplay {
     if (!existed || this.sourcesPressed.size > 0) {
       return;
     }
+    console.log(`[Button] released (${sourceId})`);
 
     this.buttonReleaseTimeArray.push(Date.now());
     if (!this.buttonDetectInterval) {
