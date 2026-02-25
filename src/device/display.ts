@@ -39,8 +39,10 @@ const parseNumberList = (value: string | undefined, fallback: number[]): number[
 
 const parseGpioState = (raw: string): boolean | null => {
   const normalized = raw.trim().toLowerCase();
-  if (normalized === "1" || normalized === "active") return true;
-  if (normalized === "0" || normalized === "inactive") return false;
+  if (normalized.includes("inactive")) return false;
+  if (normalized.includes("active")) return true;
+  if (/(^|[^0-9])1([^0-9]|$)/.test(normalized)) return true;
+  if (/(^|[^0-9])0([^0-9]|$)/.test(normalized)) return false;
   return null;
 };
 
@@ -281,10 +283,12 @@ class HardwareDisplay {
         if (raw === this.lastGpioValue) {
           return;
         }
+        console.log(`[GPIO] ${this.gpioUseGpiogetFallback ? "gpioget" : "sysfs"} raw=${raw}`);
         this.lastGpioValue = raw;
 
         const state = parseGpioState(raw);
         if (state === null) {
+          console.warn(`[GPIO] Unparsed GPIO state: ${raw}`);
           return;
         }
         const isPressed = this.gpioActiveLow ? !state : state;
