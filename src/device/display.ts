@@ -208,17 +208,27 @@ class HardwareDisplay {
 
     try {
       if (!fs.existsSync(gpioDir)) {
-        fs.writeFileSync("/sys/class/gpio/export", `${this.gpioPin}`);
+        try {
+          fs.writeFileSync("/sys/class/gpio/export", `${this.gpioPin}`);
+        } catch (error: any) {
+          if (error?.code !== "EBUSY") {
+            throw error;
+          }
+        }
       }
-      if (fs.existsSync(path.join(gpioDir, "direction"))) {
-        fs.writeFileSync(path.join(gpioDir, "direction"), "in");
-      }
-      if (fs.existsSync(path.join(gpioDir, "active_low"))) {
-        fs.writeFileSync(path.join(gpioDir, "active_low"), this.gpioActiveLow ? "1" : "0");
-      }
-      if (fs.existsSync(path.join(gpioDir, "edge"))) {
-        fs.writeFileSync(path.join(gpioDir, "edge"), "both");
-      }
+
+      const writeIfExists = (filePath: string, value: string): void => {
+        if (!fs.existsSync(filePath)) return;
+        try {
+          fs.writeFileSync(filePath, value);
+        } catch (error) {
+          console.warn(`[GPIO] Skipping ${path.basename(filePath)} write (${value}):`, error);
+        }
+      };
+
+      writeIfExists(path.join(gpioDir, "direction"), "in");
+      writeIfExists(path.join(gpioDir, "active_low"), this.gpioActiveLow ? "1" : "0");
+      writeIfExists(path.join(gpioDir, "edge"), "both");
     } catch (error) {
       console.warn("[GPIO] Failed to initialize GPIO input, listener disabled:", error);
       this.gpioValuePath = null;
