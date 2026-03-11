@@ -39,6 +39,7 @@ get_env_value() {
 # load .env variables, exclude comments and empty lines
 # check if .env file exists
 initial_volume_level=114
+alsa_volume_control="Speaker"
 serve_ollama=false
 alsa_output_device="hw:$card_index,0"
 alsa_input_device="default"
@@ -52,6 +53,9 @@ if [ -f ".env" ]; then
 
   INITIAL_VOLUME_LEVEL=$(get_env_value "INITIAL_VOLUME_LEVEL")
   [ -n "$INITIAL_VOLUME_LEVEL" ] && export INITIAL_VOLUME_LEVEL
+
+  ALSA_VOLUME_CONTROL=$(get_env_value "ALSA_VOLUME_CONTROL")
+  [ -n "$ALSA_VOLUME_CONTROL" ] && alsa_volume_control=$ALSA_VOLUME_CONTROL
 
   WHISPER_MODEL_SIZE=$(get_env_value "WHISPER_MODEL_SIZE")
   [ -n "$WHISPER_MODEL_SIZE" ] && export WHISPER_MODEL_SIZE
@@ -84,9 +88,28 @@ export ALSA_OUTPUT_DEVICE=$alsa_output_device
 export ALSA_INPUT_DEVICE=$alsa_input_device
 echo "ALSA_OUTPUT_DEVICE=$ALSA_OUTPUT_DEVICE"
 echo "ALSA_INPUT_DEVICE=$ALSA_INPUT_DEVICE"
+echo "ALSA_VOLUME_CONTROL=$alsa_volume_control"
 
-# Adjust initial volume
-amixer -c $card_index set Speaker $initial_volume_level
+# Adjust initial volume (with retries on boot to wait for card/control readiness)
+set_initial_volume() {
+  local attempts=20
+  local delay_sec=1
+  local i=1
+  while [ $i -le $attempts ]; do
+    if amixer -c "$card_index" set "$alsa_volume_control" "$initial_volume_level" >/dev/null 2>&1; then
+      echo "Initial volume applied: control=$alsa_volume_control value=$initial_volume_level (card $card_index)"
+      amixer -c "$card_index" get "$alsa_volume_control" | tail -n 5
+      return 0
+    fi
+    echo "Waiting for ALSA control '$alsa_volume_control' on card $card_index (attempt $i/$attempts)..."
+    sleep "$delay_sec"
+    i=$((i + 1))
+  done
+  echo "Warning: failed to apply initial volume to '$alsa_volume_control' on card $card_index."
+  return 1
+}
+
+set_initial_volume || true
 
 if [ "$serve_ollama" = true ]; then
   echo "Starting Ollama server..."
