@@ -4,13 +4,7 @@ export NVM_DIR="/home/pi/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 
-# Find the sound card index for wm8960 sound card
-card_index=$(awk '/wm8960/ {print $1}' /proc/asound/cards | head -n1)
-# Default to 1 if not found
-if [ -z "$card_index" ]; then
-  card_index=1
-fi
-echo "Using sound card index: $card_index"
+card_index=""
 
 # Output current environment information (for debugging)
 echo "===== Start time: $(date) =====" 
@@ -41,8 +35,10 @@ get_env_value() {
 initial_volume_level=114
 alsa_volume_control="Speaker"
 serve_ollama=false
-alsa_output_device="hw:$card_index,0"
+alsa_output_device=""
 alsa_input_device="default"
+sound_card_index_override=""
+sound_card_detect_timeout_sec="45"
 waveshare_button_gpiochip="gpiochip0"
 waveshare_button_line="17"
 waveshare_button_gpio="17"
@@ -66,6 +62,12 @@ if [ -f ".env" ]; then
 
   ALSA_VOLUME_CONTROL=$(get_env_value "ALSA_VOLUME_CONTROL")
   [ -n "$ALSA_VOLUME_CONTROL" ] && alsa_volume_control=$ALSA_VOLUME_CONTROL
+
+  SOUND_CARD_INDEX=$(get_env_value "SOUND_CARD_INDEX")
+  [ -n "$SOUND_CARD_INDEX" ] && sound_card_index_override=$SOUND_CARD_INDEX
+
+  SOUND_CARD_DETECT_TIMEOUT_SEC=$(get_env_value "SOUND_CARD_DETECT_TIMEOUT_SEC")
+  [ -n "$SOUND_CARD_DETECT_TIMEOUT_SEC" ] && sound_card_detect_timeout_sec=$SOUND_CARD_DETECT_TIMEOUT_SEC
 
   WHISPER_MODEL_SIZE=$(get_env_value "WHISPER_MODEL_SIZE")
   [ -n "$WHISPER_MODEL_SIZE" ] && export WHISPER_MODEL_SIZE
@@ -124,8 +126,56 @@ else
   exit 1
 fi
 
+detect_wm8960_card_index() {
+  local timeout_sec="$1"
+  local i=1
+  local found=""
+  while [ "$i" -le "$timeout_sec" ]; do
+    found=$(awk '/wm8960/ {print $1}' /proc/asound/cards | head -n1)
+    if [ -n "$found" ]; then
+      echo "$found"
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  return 1
+}
+
+resolve_sound_card_index() {
+  if [ -n "$sound_card_index_override" ]; then
+    echo "$sound_card_index_override"
+    return 0
+  fi
+
+  if [ -n "$alsa_output_device" ]; then
+    parsed_index=$(echo "$alsa_output_device" | sed -nE 's/^(plug)?hw:([0-9]+),.*/\2/p' | head -n1)
+    if [ -n "$parsed_index" ]; then
+      echo "$parsed_index"
+      return 0
+    fi
+  fi
+
+  detected_index=$(detect_wm8960_card_index "$sound_card_detect_timeout_sec" || true)
+  if [ -n "$detected_index" ]; then
+    echo "$detected_index"
+    return 0
+  fi
+
+  echo "1"
+  return 0
+}
+
+card_index=$(resolve_sound_card_index)
+
+if [ -z "$alsa_output_device" ]; then
+  alsa_output_device="hw:$card_index,0"
+fi
+echo "Using sound card index: $card_index"
+
 export ALSA_OUTPUT_DEVICE=$alsa_output_device
 export ALSA_INPUT_DEVICE=$alsa_input_device
+export SOUND_CARD_INDEX=$card_index
 export WAVESHARE_BUTTON_GPIOCHIP=$waveshare_button_gpiochip
 export WAVESHARE_BUTTON_LINE=$waveshare_button_line
 export WAVESHARE_BUTTON_GPIO=$waveshare_button_gpio
@@ -140,6 +190,7 @@ if [ -n "$gamepad_event_record_size" ]; then
 fi
 echo "ALSA_OUTPUT_DEVICE=$ALSA_OUTPUT_DEVICE"
 echo "ALSA_INPUT_DEVICE=$ALSA_INPUT_DEVICE"
+echo "SOUND_CARD_INDEX=$SOUND_CARD_INDEX"
 echo "ALSA_VOLUME_CONTROL=$alsa_volume_control"
 echo "WAVESHARE_BUTTON_GPIOCHIP=$WAVESHARE_BUTTON_GPIOCHIP"
 echo "WAVESHARE_BUTTON_LINE=$WAVESHARE_BUTTON_LINE"
