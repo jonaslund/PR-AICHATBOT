@@ -82,11 +82,11 @@ class HardwareDisplay {
   private gamepadScanTimer: NodeJS.Timeout | null = null;
   private readonly gamepadStreams = new Map<string, fs.ReadStream>();
   private readonly gamepadBufferMap = new Map<string, Buffer>();
-  private readonly gamepadRecordSizeForced = Boolean(process.env.GAMEPAD_EVENT_RECORD_SIZE);
   private gamepadRecordSize = parseInt(
     process.env.GAMEPAD_EVENT_RECORD_SIZE || (process.arch.includes("64") ? "24" : "16"),
     10,
   );
+  private readonly gamepadInvalidEventCount = new Map<string, number>();
   private readonly gamepadDebug = parseBoolean(process.env.GAMEPAD_DEBUG, false);
 
   private readonly gpioPin = parseInt(process.env.WAVESHARE_BUTTON_GPIO || process.env.BUTTON_GPIO || "17", 10);
@@ -380,7 +380,7 @@ class HardwareDisplay {
   }
 
   private consumeGamepadEvents(eventPath: string, chunk: Buffer): void {
-    if (!this.gamepadRecordSizeForced && this.gamepadBufferMap.get(eventPath)?.length === 0) {
+    if (this.gamepadBufferMap.get(eventPath)?.length === 0) {
       // Auto-detect input_event struct size on first payload if not forced by env.
       // Some systems expose 24-byte records while others expose 16-byte records.
       if (chunk.length >= 24 && chunk.length % 24 === 0 && chunk.length % 16 !== 0) {
@@ -402,19 +402,22 @@ class HardwareDisplay {
       const code = eventBuffer.readUInt16LE(eventOffset + 2);
       const value = eventBuffer.readInt32LE(eventOffset + 4);
 
-      if (
-        !this.gamepadRecordSizeForced &&
-        type > 0x1f &&
-        (this.gamepadRecordSize === 16 || this.gamepadRecordSize === 24)
-      ) {
-        // If parsed type is implausible, likely wrong record size. Flip once.
-        this.gamepadRecordSize = this.gamepadRecordSize === 16 ? 24 : 16;
-        if (this.gamepadDebug) {
-          console.log(`[Gamepad] Switched recordSize to ${this.gamepadRecordSize} due to implausible type=${type}`);
+      if (type > 0x1f) {
+        const invalidCount = (this.gamepadInvalidEventCount.get(eventPath) || 0) + 1;
+        this.gamepadInvalidEventCount.set(eventPath, invalidCount);
+        if (invalidCount >= 3) {
+          this.gamepadRecordSize = this.gamepadRecordSize === 16 ? 24 : 16;
+          this.gamepadInvalidEventCount.set(eventPath, 0);
+          this.gamepadBufferMap.set(eventPath, Buffer.alloc(0));
+          if (this.gamepadDebug) {
+            console.log(
+              `[Gamepad] Switched recordSize to ${this.gamepadRecordSize} after invalid event streak (type=${type}).`,
+            );
+          }
+          return;
         }
-        // Re-parse this event with the new size on next loop.
-        buffer = Buffer.concat([eventBuffer, buffer]);
-        continue;
+      } else {
+        this.gamepadInvalidEventCount.set(eventPath, 0);
       }
 
       if (this.gamepadDebug) {
