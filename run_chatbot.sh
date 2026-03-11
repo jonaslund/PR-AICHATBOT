@@ -43,6 +43,8 @@ alsa_volume_control="Speaker"
 serve_ollama=false
 alsa_output_device="hw:$card_index,0"
 alsa_input_device="default"
+gamepad_listener_enabled="true"
+gamepad_button_codes="304,305,307,308"
 if [ -f ".env" ]; then
   # Load only SERVE_OLLAMA from .env (ignore comments/other vars)
   SERVE_OLLAMA=$(get_env_value "SERVE_OLLAMA")
@@ -69,6 +71,12 @@ if [ -f ".env" ]; then
   ALSA_INPUT_DEVICE=$(get_env_value "ALSA_INPUT_DEVICE")
   [ -n "$ALSA_INPUT_DEVICE" ] && alsa_input_device=$ALSA_INPUT_DEVICE
 
+  GAMEPAD_LISTENER_ENABLED=$(get_env_value "GAMEPAD_LISTENER_ENABLED")
+  [ -n "$GAMEPAD_LISTENER_ENABLED" ] && gamepad_listener_enabled=$GAMEPAD_LISTENER_ENABLED
+
+  GAMEPAD_BUTTON_CODES=$(get_env_value "GAMEPAD_BUTTON_CODES")
+  [ -n "$GAMEPAD_BUTTON_CODES" ] && gamepad_button_codes=$GAMEPAD_BUTTON_CODES
+
   echo ".env variables loaded."
 
   # check if SERVE_OLLAMA is set to true
@@ -89,6 +97,48 @@ export ALSA_INPUT_DEVICE=$alsa_input_device
 echo "ALSA_OUTPUT_DEVICE=$ALSA_OUTPUT_DEVICE"
 echo "ALSA_INPUT_DEVICE=$ALSA_INPUT_DEVICE"
 echo "ALSA_VOLUME_CONTROL=$alsa_volume_control"
+echo "GAMEPAD_LISTENER_ENABLED=$gamepad_listener_enabled"
+echo "GAMEPAD_BUTTON_CODES=$gamepad_button_codes"
+
+log_gamepad_preflight() {
+  echo "===== Gamepad preflight ====="
+  if [ "$gamepad_listener_enabled" != "true" ]; then
+    echo "Gamepad listener is disabled by env."
+    echo "============================="
+    return
+  fi
+
+  if [ ! -d "/dev/input" ]; then
+    echo "/dev/input does not exist."
+    echo "============================="
+    return
+  fi
+
+  event_nodes=$(ls /dev/input/event* 2>/dev/null || true)
+  if [ -z "$event_nodes" ]; then
+    echo "No /dev/input/event* devices found."
+    echo "============================="
+    return
+  fi
+
+  for event_node in $event_nodes; do
+    event_name=$(basename "$event_node")
+    name_file="/sys/class/input/$event_name/device/name"
+    device_name="unknown"
+    if [ -f "$name_file" ]; then
+      device_name=$(cat "$name_file")
+    fi
+    perms=$(ls -l "$event_node")
+    echo "$event_node | name=$device_name"
+    echo "  $perms"
+  done
+
+  if command -v id >/dev/null 2>&1; then
+    echo "Current groups: $(id -nG)"
+  fi
+  echo "Expected gamepad button codes: $gamepad_button_codes"
+  echo "============================="
+}
 
 # Adjust initial volume (with retries on boot to wait for card/control readiness)
 set_initial_volume() {
@@ -110,6 +160,7 @@ set_initial_volume() {
 }
 
 set_initial_volume || true
+log_gamepad_preflight
 
 if [ "$serve_ollama" = true ]; then
   echo "Starting Ollama server..."
