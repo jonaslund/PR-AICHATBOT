@@ -55,8 +55,8 @@ echo "Creating systemd service file..."
 sudo tee /etc/systemd/system/chatbot.service > /dev/null <<EOF
 [Unit]
 Description=Chatbot Service
-After=network.target sound.target
-Wants=sound.target
+After=network-online.target sound.target
+Wants=network-online.target sound.target
 
 [Service]
 Type=simple
@@ -66,6 +66,7 @@ SupplementaryGroups=audio video gpio input
 
 # Use the dynamic Home Directory
 WorkingDirectory=$REPO_DIR
+ExecStartPre=/bin/sleep 8
 ExecStart=/bin/bash $REPO_DIR/run_chatbot.sh
 
 # Inject the dynamic Node path and dynamic User ID
@@ -83,6 +84,8 @@ StandardError=append:$REPO_DIR/chatbot.log
 
 Restart=always
 RestartSec=2
+KillMode=mixed
+TimeoutStopSec=15
 
 [Install]
 WantedBy=multi-user.target

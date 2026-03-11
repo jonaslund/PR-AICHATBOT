@@ -265,6 +265,18 @@ set_initial_volume() {
 }
 
 set_initial_volume || true
+
+# Some audio stacks reset mixer state shortly after boot; re-apply volume in background.
+reapply_volume_later() {
+  (
+    sleep 10
+    set_initial_volume >/dev/null 2>&1 || true
+    sleep 20
+    set_initial_volume >/dev/null 2>&1 || true
+  ) &
+}
+
+reapply_volume_later
 log_gamepad_preflight
 
 if [ "$serve_ollama" = true ]; then
