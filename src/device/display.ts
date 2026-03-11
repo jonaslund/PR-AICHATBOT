@@ -82,7 +82,8 @@ class HardwareDisplay {
   private gamepadScanTimer: NodeJS.Timeout | null = null;
   private readonly gamepadStreams = new Map<string, fs.ReadStream>();
   private readonly gamepadBufferMap = new Map<string, Buffer>();
-  private readonly gamepadRecordSize = parseInt(
+  private readonly gamepadRecordSizeForced = Boolean(process.env.GAMEPAD_EVENT_RECORD_SIZE);
+  private gamepadRecordSize = parseInt(
     process.env.GAMEPAD_EVENT_RECORD_SIZE || (process.arch.includes("64") ? "24" : "16"),
     10,
   );
@@ -379,6 +380,16 @@ class HardwareDisplay {
   }
 
   private consumeGamepadEvents(eventPath: string, chunk: Buffer): void {
+    if (!this.gamepadRecordSizeForced && this.gamepadBufferMap.get(eventPath)?.length === 0) {
+      // Auto-detect input_event struct size on first payload if not forced by env.
+      // Some systems expose 24-byte records while others expose 16-byte records.
+      if (chunk.length >= 24 && chunk.length % 24 === 0 && chunk.length % 16 !== 0) {
+        this.gamepadRecordSize = 24;
+      } else if (chunk.length >= 16 && chunk.length % 16 === 0 && chunk.length % 24 !== 0) {
+        this.gamepadRecordSize = 16;
+      }
+    }
+
     const previous = this.gamepadBufferMap.get(eventPath) || Buffer.alloc(0);
     let buffer = Buffer.concat([previous, chunk]);
 
@@ -390,6 +401,21 @@ class HardwareDisplay {
       const type = eventBuffer.readUInt16LE(eventOffset);
       const code = eventBuffer.readUInt16LE(eventOffset + 2);
       const value = eventBuffer.readInt32LE(eventOffset + 4);
+
+      if (
+        !this.gamepadRecordSizeForced &&
+        type > 0x1f &&
+        (this.gamepadRecordSize === 16 || this.gamepadRecordSize === 24)
+      ) {
+        // If parsed type is implausible, likely wrong record size. Flip once.
+        this.gamepadRecordSize = this.gamepadRecordSize === 16 ? 24 : 16;
+        if (this.gamepadDebug) {
+          console.log(`[Gamepad] Switched recordSize to ${this.gamepadRecordSize} due to implausible type=${type}`);
+        }
+        // Re-parse this event with the new size on next loop.
+        buffer = Buffer.concat([eventBuffer, buffer]);
+        continue;
+      }
 
       if (this.gamepadDebug) {
         console.log(`[Gamepad] event type=${type} code=${code} value=${value}`);
