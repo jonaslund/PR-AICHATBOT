@@ -82,7 +82,11 @@ class HardwareDisplay {
   private gamepadScanTimer: NodeJS.Timeout | null = null;
   private readonly gamepadStreams = new Map<string, fs.ReadStream>();
   private readonly gamepadBufferMap = new Map<string, Buffer>();
-  private readonly gamepadRecordSize = process.arch.includes("64") ? 24 : 16;
+  private readonly gamepadRecordSize = parseInt(
+    process.env.GAMEPAD_EVENT_RECORD_SIZE || (process.arch.includes("64") ? "24" : "16"),
+    10,
+  );
+  private readonly gamepadDebug = parseBoolean(process.env.GAMEPAD_DEBUG, false);
 
   private readonly gpioPin = parseInt(process.env.WAVESHARE_BUTTON_GPIO || process.env.BUTTON_GPIO || "17", 10);
   private readonly gpioChip = process.env.WAVESHARE_BUTTON_GPIOCHIP || "gpiochip0";
@@ -351,7 +355,9 @@ class HardwareDisplay {
         const stream = fs.createReadStream(eventPath);
         this.gamepadStreams.set(eventPath, stream);
         this.gamepadBufferMap.set(eventPath, Buffer.alloc(0));
-        console.log(`[Gamepad] Listening on ${eventPath} (${deviceName || "unknown"}).`);
+        console.log(
+          `[Gamepad] Listening on ${eventPath} (${deviceName || "unknown"}), recordSize=${this.gamepadRecordSize}.`,
+        );
 
         stream.on("data", (chunk: string | Buffer) => {
           const chunkBuffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
@@ -384,6 +390,10 @@ class HardwareDisplay {
       const type = eventBuffer.readUInt16LE(eventOffset);
       const code = eventBuffer.readUInt16LE(eventOffset + 2);
       const value = eventBuffer.readInt32LE(eventOffset + 4);
+
+      if (this.gamepadDebug) {
+        console.log(`[Gamepad] event type=${type} code=${code} value=${value}`);
+      }
 
       if (type !== 1 || !this.gamepadButtonCodes.has(code)) {
         continue;
